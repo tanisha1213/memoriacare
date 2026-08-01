@@ -5,14 +5,12 @@ import AuthModal from './components/AuthModal';
 import { Heart, Globe, LogOut, UserCheck } from 'lucide-react';
 
 export default function App() {
-  // 1. Authentication State
   const [token, setToken] = useState(() => localStorage.getItem('token') || null);
   const [familyCode, setFamilyCode] = useState(() => localStorage.getItem('familyCode') || null);
   const [familyName, setFamilyName] = useState(() => localStorage.getItem('familyName') || null);
 
-  // 2. Navigation & UI State
-  const [activeTab, setActiveTab] = useState('MIRROR'); // 'MIRROR' | 'CAREGIVER'
-  const [currentLang, setCurrentLang] = useState('en'); // 'en' | 'hi' | 'mr'
+  const [activeTab, setActiveTab] = useState('MIRROR');
+  const [currentLang, setCurrentLang] = useState('en');
 
   const languages = [
     { code: 'en', label: 'English', flag: '🇬🇧' },
@@ -20,14 +18,12 @@ export default function App() {
     { code: 'mr', label: 'मराठी (Marathi)', flag: '🇮🇳' }
   ];
 
-  // Auth Success Handler
   const handleAuthSuccess = (code, name) => {
     setFamilyCode(code);
     setFamilyName(name);
     setToken(localStorage.getItem('token'));
   };
 
-  // Logout Handler
   const handleLogout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('familyCode');
@@ -39,14 +35,11 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-['Plus_Jakarta_Sans',sans-serif] selection:bg-emerald-500 selection:text-white relative">
-      {/* AUTH MODAL OVERLAY */}
       {!token || !familyCode ? (
         <AuthModal onAuthSuccess={handleAuthSuccess} />
       ) : null}
 
-      {/* Top Header Bar */}
       <header className="w-full bg-slate-900/80 backdrop-blur-md border-b border-slate-800 px-4 sm:px-6 py-3.5 sticky top-0 z-40 flex flex-col md:flex-row items-center justify-between gap-4 shadow-lg">
-        {/* App Logo & Name */}
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-inner">
             <Heart className="w-5 h-5 fill-emerald-500/20" />
@@ -64,7 +57,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Tab Switcher: Patient Mirror vs Caregiver Dashboard */}
         <div className="flex items-center bg-slate-950 p-1 rounded-2xl border border-slate-800/80 shadow-inner">
           <button
             onClick={() => setActiveTab('MIRROR')}
@@ -91,9 +83,7 @@ export default function App() {
           </button>
         </div>
 
-        {/* Controls: Language Selector, Authenticated Family Badge, Logout */}
         <div className="flex flex-wrap items-center gap-3 w-full md:w-auto justify-between md:justify-end">
-          {/* Language Selector */}
           <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-2xl px-3 py-1.5 text-xs">
             <Globe className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
             <select
@@ -109,7 +99,6 @@ export default function App() {
             </select>
           </div>
 
-          {/* Authenticated Family Account Badge */}
           {familyCode && (
             <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-2xl px-3 py-1.5 text-xs">
               <UserCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
@@ -122,7 +111,6 @@ export default function App() {
             </div>
           )}
 
-          {/* Logout Button */}
           {token && (
             <button
               onClick={handleLogout}
@@ -136,7 +124,6 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main View Area */}
       <main className="flex-1">
         {familyCode ? (
           activeTab === 'MIRROR' ? (

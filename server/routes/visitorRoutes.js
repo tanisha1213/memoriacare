@@ -6,11 +6,9 @@ const Visitor = require('../models/Visitor');
 const UnknownQueue = require('../models/UnknownQueue');
 const supabase = require('../supabaseClient');
 
-// In-Memory Fallback Store (Guarantees 100% availability)
 const memoryVisitors = [];
 const memoryUnknownQueue = [];
 
-// Helper function: Calculate Euclidean Distance
 function calculateEuclideanDistance(vecA, vecB) {
   if (!vecA || !vecB || vecA.length !== vecB.length) return Infinity;
   let sum = 0;
@@ -21,7 +19,6 @@ function calculateEuclideanDistance(vecA, vecB) {
   return Math.sqrt(sum);
 }
 
-// Vector Sanitizer Helper: Converts keyed objects to Float Arrays
 function sanitizeEmbedding(raw) {
   if (!raw) return [];
   if (Array.isArray(raw)) return raw.map((n) => Number(n));
@@ -29,14 +26,9 @@ function sanitizeEmbedding(raw) {
   return [];
 }
 
-/**
- * 1. GET /api/visitors/:familyCode
- * @desc Fetch registered visitors for familyCode
- */
 router.get('/visitors/:familyCode', async (req, res) => {
   const { familyCode } = req.params;
 
-  // 1. Try Supabase
   try {
     if (supabase) {
       const { data, error } = await supabase
@@ -59,7 +51,6 @@ router.get('/visitors/:familyCode', async (req, res) => {
     }
   } catch (sbErr) {}
 
-  // 2. Try Mongoose (Only if connected)
   if (mongoose.connection.readyState === 1) {
     try {
       const mongooseVisitors = await Visitor.find({ familyCode, isRegistered: true })
@@ -82,16 +73,12 @@ router.get('/visitors/:familyCode', async (req, res) => {
     } catch (mgErr) {}
   }
 
-  // 3. In-Memory Fallback
   const filtered = memoryVisitors.filter(
     (v) => v.familyCode === familyCode && v.isRegistered !== false
   );
   return res.status(200).json({ success: true, count: filtered.length, data: filtered });
 });
 
-/**
- * 2. GET /api/queue/:familyCode & GET /api/visitors/:familyCode/unknowns
- */
 const getUnknownsHandler = async (req, res) => {
   const { familyCode } = req.params;
 
@@ -138,9 +125,6 @@ const getUnknownsHandler = async (req, res) => {
 router.get('/queue/:familyCode', getUnknownsHandler);
 router.get('/visitors/:familyCode/unknowns', getUnknownsHandler);
 
-/**
- * 3. POST /api/queue/unknown & POST /api/visitors/:familyCode/unknown
- */
 const postUnknownHandler = async (req, res) => {
   try {
     const familyCode = req.params.familyCode || req.body.familyCode || 'FAM123';
@@ -190,7 +174,6 @@ const postUnknownHandler = async (req, res) => {
         .catch(() => {});
     }
 
-    console.log(`📸 Saved unknown snapshot for family ${familyCode} (${cleanVector.length}-D vector)`);
     return res.status(200).json({ success: true, id: newQueueItem._id, data: newQueueItem });
   } catch (err) {
     console.error('Queue Post Error:', err);
@@ -201,10 +184,6 @@ const postUnknownHandler = async (req, res) => {
 router.post('/queue/unknown', postUnknownHandler);
 router.post('/visitors/:familyCode/unknown', postUnknownHandler);
 
-/**
- * 4. POST /api/queue/approve/:id & POST /api/visitors/:familyCode/label-unknown
- * @desc Approves unknown snapshot & registers visitor with full 128-D vector
- */
 const approveHandler = async (req, res) => {
   try {
     const { id } = req.params;
@@ -216,7 +195,6 @@ const approveHandler = async (req, res) => {
 
     let unknownItem = null;
 
-    // 1. Check Supabase unknown_queue table first
     if (supabase && id) {
       try {
         const { data } = await supabase.from('unknown_queue').select('*').eq('id', id).single();
@@ -230,14 +208,12 @@ const approveHandler = async (req, res) => {
       } catch (e) {}
     }
 
-    // 2. Check Mongoose
     if (!unknownItem && mongoose.connection.readyState === 1) {
       try {
         unknownItem = await UnknownQueue.findById(id).maxTimeMS(1000).exec();
       } catch (e) {}
     }
 
-    // 3. Check memoryUnknownQueue
     if (!unknownItem) {
       unknownItem = memoryUnknownQueue.find((q) => q._id === id || q.id === id);
     }
@@ -246,10 +222,6 @@ const approveHandler = async (req, res) => {
     const rawEmbedding = bodyRawEmbedding || (unknownItem && unknownItem.embedding) || [];
     const cleanVector = sanitizeEmbedding(rawEmbedding);
     const photoThumbnail = bodyPhoto || (unknownItem && unknownItem.photoThumbnail) || '';
-
-    if (cleanVector.length === 0) {
-      console.warn('⚠️ Warning: Approving visitor with 0-D vector array. Make sure embedding is passed in body or snapshot queue.');
-    }
 
     const newVisitorData = {
       _id: `vis_${Date.now()}`,
@@ -309,8 +281,6 @@ const approveHandler = async (req, res) => {
       }
     }
 
-    console.log(`✅ [REGISTERED NEW VISITOR] ${name} (${relationship}) added for family ${familyCode} (${cleanVector.length}-D vector)`);
-
     return res.status(200).json({
       success: true,
       message: 'Visitor successfully registered!',
@@ -325,9 +295,6 @@ const approveHandler = async (req, res) => {
 router.post('/queue/approve/:id', approveHandler);
 router.post('/visitors/:familyCode/label-unknown', approveHandler);
 
-/**
- * 5. DELETE /api/visitors/:id
- */
 router.delete('/visitors/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -354,9 +321,6 @@ router.delete('/visitors/:id', async (req, res) => {
   }
 });
 
-/**
- * 6. GET /api/tts/stream
- */
 router.get('/tts/stream', (req, res) => {
   try {
     const { text, lang = 'en' } = req.query;
@@ -411,9 +375,6 @@ router.get('/tts/stream', (req, res) => {
   }
 });
 
-/**
- * PATCH /api/queue/dismiss/:id
- */
 router.patch('/queue/dismiss/:id', async (req, res) => {
   const { id } = req.params;
   const item = memoryUnknownQueue.find((q) => q._id === id);

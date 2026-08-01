@@ -19,7 +19,6 @@ import {
   UserPlus
 } from 'lucide-react';
 
-// Format relative arrival timestamp
 function getRelativeTime(timestamp) {
   if (!timestamp) return 'Just now';
   const now = new Date();
@@ -35,7 +34,6 @@ function getRelativeTime(timestamp) {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-// Web Audio API Synthesizer Chime
 function playAlertChime() {
   try {
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -77,18 +75,17 @@ function playAlertChime() {
   }
 }
 
-// Trigger native browser Web Desktop Notification
 function triggerDesktopNotification() {
   if ('Notification' in window) {
     if (Notification.permission === 'granted') {
-      new Notification('⚠️ MemoriaCare Alert: New Visitor Detected', {
+      new Notification('MemoriaCare Alert: New Visitor Detected', {
         body: 'An unknown person is at the mirror. Tap to review.',
         icon: '/favicon.svg'
       });
     } else if (Notification.permission !== 'denied') {
       Notification.requestPermission().then((permission) => {
         if (permission === 'granted') {
-          new Notification('⚠️ MemoriaCare Alert: New Visitor Detected', {
+          new Notification('MemoriaCare Alert: New Visitor Detected', {
             body: 'An unknown person is at the mirror. Tap to review.',
             icon: '/favicon.svg'
           });
@@ -99,26 +96,21 @@ function triggerDesktopNotification() {
 }
 
 export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
-  const [activeTab, setActiveTab] = useState('QUEUE'); // 'QUEUE' | 'REGISTERED'
+  const [activeTab, setActiveTab] = useState('QUEUE');
   const [unknownQueue, setUnknownQueue] = useState([]);
   const [registeredVisitors, setRegisteredVisitors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
   const [isPolling, setIsPolling] = useState(true);
-
-  // Form states per card ID
   const [formData, setFormData] = useState({});
 
-  // Ref to track previous unknown queue length
   const prevUnknownsLengthRef = useRef(null);
 
-  // Show Toast notification
   const showToast = (message, type = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
   };
 
-  // Test Alert Sound button & request Web Notification permissions
   const handleTestAlertSound = () => {
     playAlertChime();
 
@@ -136,7 +128,6 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
     }
   };
 
-  // Fetch pending unknown snapshots
   const fetchUnknowns = useCallback(async () => {
     try {
       const res = await axios.get(`/api/visitors/${familyCode}/unknowns`);
@@ -148,7 +139,7 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
         ) {
           playAlertChime();
           triggerDesktopNotification();
-          showToast('⚠️ New visitor detected at mirror camera!', 'error');
+          showToast('New visitor detected at mirror camera!', 'error');
         }
 
         prevUnknownsLengthRef.current = queueData.length;
@@ -161,7 +152,6 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
     }
   }, [familyCode]);
 
-  // Fetch registered visitors list for management
   const fetchRegisteredVisitors = useCallback(async () => {
     try {
       const res = await axios.get(`/api/visitors/${familyCode}`);
@@ -174,7 +164,6 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
     }
   }, [familyCode]);
 
-  // Poll API every 4 seconds
   useEffect(() => {
     prevUnknownsLengthRef.current = null;
     fetchUnknowns();
@@ -190,7 +179,6 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
     return () => clearInterval(interval);
   }, [fetchUnknowns, fetchRegisteredVisitors, isPolling, familyCode]);
 
-  // Form field change handler
   const handleInputChange = (id, field, value) => {
     setFormData((prev) => ({
       ...prev,
@@ -201,7 +189,6 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
     }));
   };
 
-  // Save & Register Visitor
   const handleSaveAndRegister = async (unknownId) => {
     const itemData = formData[unknownId] || {};
     const name = itemData.name ? itemData.name.trim() : '';
@@ -244,7 +231,6 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
     }
   };
 
-  // Dismiss Alert
   const handleDismissAlert = async (unknownId) => {
     try {
       const res = await axios.patch(`/api/queue/dismiss/${unknownId}`);
@@ -260,7 +246,6 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
     }
   };
 
-  // Delete Registered Visitor
   const handleDeleteVisitor = async (id, name) => {
     if (!window.confirm(`Are you sure you want to remove "${name}" from registered family members?`)) {
       return;
@@ -294,7 +279,6 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 p-4 sm:p-6 lg:p-8 select-none relative">
-      {/* Toast Notification */}
       {toast && (
         <div
           className={`fixed top-20 right-6 z-50 max-w-md p-4 rounded-2xl shadow-2xl backdrop-blur-md border flex items-center gap-3 animate-in fade-in slide-in-from-top-5 transition-all ${
@@ -313,7 +297,6 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
       )}
 
       <div className="max-w-7xl mx-auto space-y-8">
-        {/* Header Bar */}
         <header className="bg-slate-950/80 border border-slate-800 rounded-3xl p-6 backdrop-blur-xl shadow-xl flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
           <div className="flex items-center gap-4">
             <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-inner">
@@ -368,7 +351,6 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
           </div>
         </header>
 
-        {/* Dashboard Two-Tab Navigation */}
         <div className="flex items-center border-b border-slate-800 gap-4">
           <button
             onClick={() => setActiveTab('QUEUE')}
@@ -379,7 +361,7 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
             }`}
           >
             <BellRing className="w-4 h-4" />
-            ⚠️ Unknown Visitor Alerts
+            Unknown Visitor Alerts
             <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-xs font-extrabold border border-amber-500/30">
               {unknownQueue.length}
             </span>
@@ -394,14 +376,13 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
             }`}
           >
             <Users className="w-4 h-4" />
-            👥 Registered Family Members
+            Registered Family Members
             <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-extrabold border border-emerald-500/30">
               {registeredVisitors.length}
             </span>
           </button>
         </div>
 
-        {/* TAB 1: PENDING UNKNOWN SNAPSHOTS */}
         {activeTab === 'QUEUE' && (
           <section>
             {loading ? (
@@ -549,7 +530,6 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
           </section>
         )}
 
-        {/* TAB 2: REGISTERED FAMILY MEMBERS */}
         {activeTab === 'REGISTERED' && (
           <section>
             {registeredVisitors.length === 0 ? (

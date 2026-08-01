@@ -2,18 +2,30 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as faceapi from '@vladmandic/face-api';
 import axios from 'axios';
 
-// Multi-language text generator helpers
-function getGreetingText(visitor, lang) {
+function constructGreeting(visitor, lang) {
   const code = (lang || 'hi').toLowerCase().split('-')[0];
-  const relationship = visitor.relationship || (code === 'hi' ? 'परिचित' : code === 'mr' ? 'नातेवाईक' : 'visitor');
-  const name = visitor.name || '';
+  const name = visitor.name || (code === 'hi' ? 'परिचित' : code === 'mr' ? 'परिचित' : 'visitor');
+  const relation = visitor.relationship || (code === 'hi' ? 'परिचित' : code === 'mr' ? 'नातेवाईक' : 'visitor');
+  const note = visitor.contextNote ? visitor.contextNote.trim() : '';
 
-  if (code === 'mr') {
-    return `हे तुमचे ${relationship}, ${name} आहेत.`;
-  } else if (code === 'hi') {
-    return `यह आपके ${relationship}, ${name} हैं।`;
+  if (code === 'hi') {
+    let text = `यह आपके ${relation}, ${name} हैं।`;
+    if (note) {
+      text += ` याद दिला दें, ${note}`;
+    }
+    return text;
+  } else if (code === 'mr') {
+    let text = `हे तुमचे ${relation}, ${name} आहेत।`;
+    if (note) {
+      text += ` आठवण ठेवा, ${note}`;
+    }
+    return text;
   } else {
-    return `This is your ${relationship}, ${name}.`;
+    let text = `This is your ${relation}, ${name}.`;
+    if (note) {
+      text += ` Quick reminder: ${note}`;
+    }
+    return text;
   }
 }
 
@@ -41,7 +53,6 @@ export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi
   const unknownCounterRef = useRef(0);
   const isSnapshotLockedRef = useRef(false);
 
-  // 1. Fetch Registered Visitors & Poll for Real-Time Updates (Every 4s)
   useEffect(() => {
     const fetchVisitors = async () => {
       try {
@@ -58,12 +69,10 @@ export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi
 
     fetchVisitors();
 
-    // 🔄 REAL-TIME VECTOR POLLING: Syncs newly approved caregiver profiles automatically every 4 seconds!
     const pollInterval = setInterval(fetchVisitors, 4000);
     return () => clearInterval(pollInterval);
   }, [familyCode]);
 
-  // 2. Hardware Camera Init
   const startMirrorSystem = async () => {
     if (isCameraStarted) return;
     setIsCameraStarted(true);
@@ -102,14 +111,12 @@ export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi
     }
   };
 
-  // AUTO-START CAMERA ON MOUNT
   useEffect(() => {
     if (isDataLoaded && !isCameraStarted) {
       startMirrorSystem();
     }
   }, [isDataLoaded]);
 
-  // 3. Audio Streaming Trigger with Language Proxy
   const speakText = (text, lang) => {
     const targetLang = (lang || 'hi').toLowerCase().split('-')[0];
     const audioUrl = `/api/tts/stream?text=${encodeURIComponent(text)}&lang=${targetLang}`;
@@ -119,7 +126,6 @@ export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi
     audio.play().catch((e) => console.error('Audio playback error:', e));
   };
 
-  // 4. Main Processing Loop
   useEffect(() => {
     let timerId;
 
@@ -173,7 +179,6 @@ export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi
           }
         });
 
-        // RECOGNIZED MATCH (Threshold: 0.55)
         if (bestMatch && minDistance < 0.55) {
           unknownCounterRef.current = 0;
           setActiveVisitorCard(bestMatch);
@@ -181,12 +186,11 @@ export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi
           const visitorId = bestMatch._id || bestMatch.id;
           if (spokenUserRef.current !== visitorId) {
             spokenUserRef.current = visitorId;
-            const greeting = getGreetingText(bestMatch, currentLang);
+            const greeting = constructGreeting(bestMatch, currentLang);
+            console.log('🗣️ Speaking Memory Cue:', greeting);
             speakText(greeting, currentLang);
           }
-        }
-        // UNKNOWN VISITOR
-        else {
+        } else {
           setActiveVisitorCard(null);
           unknownCounterRef.current += 1;
 
@@ -241,7 +245,6 @@ export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-slate-950 p-4 text-slate-100 font-sans">
       <div className="w-full max-w-md flex flex-col items-center">
-        {/* VIDEO DISPLAY CONTAINER */}
         <div className="relative w-full rounded-2xl overflow-hidden border-4 border-slate-800 shadow-2xl bg-slate-900 min-h-[320px] flex items-center justify-center">
           <video
             ref={videoRef}
@@ -255,7 +258,6 @@ export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi
 
         <p className="mt-3 text-slate-400 text-xs font-medium uppercase tracking-wider">{statusMsg}</p>
 
-        {/* CUE CARD FOR PATIENT */}
         {activeVisitorCard && (
           <div className="mt-4 p-5 bg-slate-900/90 backdrop-blur-md border border-slate-700 rounded-2xl text-center w-full shadow-2xl animate-in fade-in">
             <h2 className="text-2xl font-bold text-white">{activeVisitorCard.name}</h2>

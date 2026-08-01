@@ -37,7 +37,6 @@ export default function AuthModal({ onAuthSuccess }) {
   return (
     <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-xl flex items-center justify-center p-4 z-50 animate-in fade-in select-none">
       <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-8 max-w-md w-full shadow-2xl text-slate-100 relative overflow-hidden backdrop-blur-md">
-        {/* Glow accent */}
         <div className="absolute -top-20 -left-20 w-40 h-40 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute -bottom-20 -right-20 w-40 h-40 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
 
