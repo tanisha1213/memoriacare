@@ -2,14 +2,38 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
+const fs = require('fs');
+const path = require('path');
 const Family = require('../models/Family');
 const supabase = require('../supabaseClient');
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'memoriacare_secret_key_2026';
 
-// In-memory fallback store for family accounts
-const memoryFamilies = [];
+// Persistent Local File DB Backup (Guarantees accounts persist across server restarts)
+const DB_FILE = path.join(__dirname, '../families_db.json');
+
+function loadLocalFamilies() {
+  try {
+    if (fs.existsSync(DB_FILE)) {
+      const data = fs.readFileSync(DB_FILE, 'utf8');
+      return JSON.parse(data);
+    }
+  } catch (e) {
+    console.warn('Error reading local families_db.json:', e.message);
+  }
+  return [];
+}
+
+function saveLocalFamily(family) {
+  try {
+    const list = loadLocalFamilies();
+    list.push(family);
+    fs.writeFileSync(DB_FILE, JSON.stringify(list, null, 2), 'utf8');
+  } catch (e) {
+    console.warn('Error saving to local families_db.json:', e.message);
+  }
+}
 
 /**
  * 1. POST /api/auth/register
@@ -26,9 +50,10 @@ router.post('/register', async (req, res) => {
     const cleanEmail = email.toLowerCase().trim();
     const cleanName = familyName.trim();
 
-    // 1. Check memory store first
-    const existingMemory = memoryFamilies.find((f) => f.email === cleanEmail);
-    if (existingMemory) {
+    // 1. Check local file database
+    const localList = loadLocalFamilies();
+    const existingLocal = localList.find((f) => f.email === cleanEmail);
+    if (existingLocal) {
       return res.status(400).json({ success: false, error: 'Email is already registered.' });
     }
 
@@ -42,7 +67,7 @@ router.post('/register', async (req, res) => {
       } catch (e) {}
     }
 
-    // 3. Check Supabase (use maybeSingle so 0 rows return null instead of throwing)
+    // 3. Check Supabase (if table exists)
     if (supabase) {
       try {
         const { data, error } = await supabase.from('families').select('*').eq('email', cleanEmail).maybeSingle();
@@ -65,10 +90,11 @@ router.post('/register', async (req, res) => {
       familyName: cleanName,
       email: cleanEmail,
       password: hashedPassword,
-      createdAt: new Date()
+      createdAt: new Date().toISOString()
     };
 
-    memoryFamilies.push(familyData);
+    // Save to local file DB
+    saveLocalFamily(familyData);
 
     // Save to Mongoose if connected
     if (mongoose.connection.readyState === 1) {
@@ -82,7 +108,7 @@ router.post('/register', async (req, res) => {
         .catch((e) => console.warn('Mongoose save family notice:', e.message));
     }
 
-    // Save to Supabase if connected (catch errors silently)
+    // Save to Supabase if connected
     if (supabase) {
       supabase
         .from('families')
@@ -134,8 +160,9 @@ router.post('/login', async (req, res) => {
     const cleanEmail = email.toLowerCase().trim();
     let family = null;
 
-    // 1. Check memory store
-    family = memoryFamilies.find((f) => f.email === cleanEmail);
+    // 1. Check local file DB first
+    const localList = loadLocalFamilies();
+    family = localList.find((f) => f.email === cleanEmail);
 
     // 2. Check Supabase
     if (!family && supabase) {
