@@ -10,8 +10,10 @@ const supabase = require('../supabaseClient');
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'memoriacare_secret_key_2026';
 
-// Persistent Local File DB Backup (Guarantees accounts persist across server restarts)
-const DB_FILE = path.join(__dirname, '../families_db.json');
+// Persistent File DB Backup (Uses /tmp on Vercel serverless containers, local file in dev)
+const DB_FILE = process.env.VERCEL
+  ? path.join('/tmp', 'families_db.json')
+  : path.join(__dirname, '../families_db.json');
 
 function loadLocalFamilies() {
   try {
@@ -20,7 +22,7 @@ function loadLocalFamilies() {
       return JSON.parse(data);
     }
   } catch (e) {
-    console.warn('Error reading local families_db.json:', e.message);
+    console.warn('Error reading families DB:', e.message);
   }
   return [];
 }
@@ -31,7 +33,7 @@ function saveLocalFamily(family) {
     list.push(family);
     fs.writeFileSync(DB_FILE, JSON.stringify(list, null, 2), 'utf8');
   } catch (e) {
-    console.warn('Error saving to local families_db.json:', e.message);
+    console.warn('Error saving families DB:', e.message);
   }
 }
 
@@ -67,7 +69,7 @@ router.post('/register', async (req, res) => {
       } catch (e) {}
     }
 
-    // 3. Check Supabase (if table exists)
+    // 3. Check Supabase (use maybeSingle so 0 rows return null instead of throwing)
     if (supabase) {
       try {
         const { data, error } = await supabase.from('families').select('*').eq('email', cleanEmail).maybeSingle();
