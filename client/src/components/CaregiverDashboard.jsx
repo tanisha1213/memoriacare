@@ -675,6 +675,18 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
 
                           <div className="flex items-center gap-1">
                             <button
+                              onClick={() => {
+                                try {
+                                  const audio = new Audio(`/api/tts/stream?text=${encodeURIComponent(item.reminderMessage)}&lang=hi`);
+                                  audio.play().catch(() => showToast('Tap page to enable audio', 'warning'));
+                                } catch (e) {}
+                              }}
+                              className="p-2 text-slate-400 hover:text-emerald-400 rounded-lg transition"
+                              title="Play Spoken Voice Reminder"
+                            >
+                              <Volume2 className="w-4 h-4 text-emerald-400" />
+                            </button>
+                            <button
                               onClick={() => handleTogglePauseRoutine(routineId)}
                               className="p-2 text-slate-400 hover:text-white rounded-lg transition"
                               title={isPaused ? 'Resume Reminder' : 'Pause Reminder'}

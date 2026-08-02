@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as faceapi from '@vladmandic/face-api';
 import axios from 'axios';
-import { Bell, CheckCircle2, Clock, Pill, Sun, Coffee, Utensils, Heart, Moon, Smile } from 'lucide-react';
+import { Bell, CheckCircle2, Clock, Pill, Sun, Coffee, Utensils, Heart, Moon, Volume2, VolumeX, Play } from 'lucide-react';
 
 function constructGreeting(visitor, lang) {
   const code = (lang || 'hi').toLowerCase().split('-')[0];
@@ -56,6 +56,7 @@ export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi
   const [statusMsg, setStatusMsg] = useState('Initializing...');
   const [activeVisitorCard, setActiveVisitorCard] = useState(null);
   const [activeRoutineOverlay, setActiveRoutineOverlay] = useState(null);
+  const [isAudioUnlocked, setIsAudioUnlocked] = useState(false);
 
   const isProcessingRef = useRef(false);
   const spokenUserRef = useRef(null);
@@ -63,15 +64,32 @@ export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi
   const unknownCounterRef = useRef(0);
   const isSnapshotLockedRef = useRef(false);
 
+  // Audio stream speech function with user-gesture unlock
   const speakText = (text, lang) => {
     try {
       const targetLang = (lang || 'hi').toLowerCase().split('-')[0];
       const audioUrl = `/api/tts/stream?text=${encodeURIComponent(text)}&lang=${targetLang}`;
       const audio = new Audio(audioUrl);
-      audio.play().catch((e) => console.warn('Audio play notice:', e));
+
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            setIsAudioUnlocked(true);
+          })
+          .catch((e) => {
+            console.warn('Audio play notice (user interaction required):', e);
+            setIsAudioUnlocked(false);
+          });
+      }
     } catch (err) {
       console.warn('TTS streaming error:', err);
     }
+  };
+
+  const unlockAudio = () => {
+    setIsAudioUnlocked(true);
+    speakText('Voice audio stream enabled.', currentLang);
   };
 
   // 1. Fetch Visitors & Routines
@@ -290,6 +308,37 @@ export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-slate-950 p-4 text-slate-100 font-sans">
       <div className="w-full max-w-md flex flex-col items-center">
+        {/* AUDIO AUTOPLAY UNLOCK / TEST BAR */}
+        <div className="w-full mb-3 flex items-center justify-between bg-slate-900/80 p-3 rounded-2xl border border-slate-800 backdrop-blur-md">
+          <div className="flex items-center gap-2 text-xs font-semibold">
+            {isAudioUnlocked ? (
+              <span className="flex items-center gap-1.5 text-emerald-400">
+                <Volume2 className="w-4 h-4 animate-pulse" /> Voice Audio Enabled
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5 text-amber-400">
+                <VolumeX className="w-4 h-4" /> Tap to Enable Voice Audio
+              </span>
+            )}
+          </div>
+
+          <button
+            onClick={() => {
+              unlockAudio();
+              if (routines && routines.length > 0) {
+                const r = routines[0];
+                speakText(r.reminderMessage || 'Testing voice reminder audio', currentLang);
+              } else {
+                speakText('Good morning. It is 9:00 AM. It is time for your medicine.', currentLang);
+              }
+            }}
+            className="px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs font-bold rounded-xl transition flex items-center gap-1.5 active:scale-95"
+          >
+            <Play className="w-3.5 h-3.5 fill-current" />
+            <span>Test Voice Audio</span>
+          </button>
+        </div>
+
         {/* VIDEO DISPLAY CONTAINER */}
         <div className="relative w-full rounded-2xl overflow-hidden border-4 border-slate-800 shadow-2xl bg-slate-900 min-h-[320px] flex items-center justify-center">
           <video
@@ -312,7 +361,7 @@ export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi
                 {getActivityIcon(activeRoutineOverlay.activityName)}
               </div>
             </div>
-            
+
             <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-500/10 text-emerald-400 rounded-full text-xs font-bold uppercase tracking-wider mb-2">
               <Clock className="w-3.5 h-3.5" />
               <span>{activeRoutineOverlay.time} Scheduled Activity</span>
@@ -323,13 +372,26 @@ export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi
               "{activeRoutineOverlay.reminderMessage}"
             </p>
 
-            <button
-              onClick={() => setActiveRoutineOverlay(null)}
-              className="mt-5 w-full py-4 bg-emerald-500 hover:bg-emerald-600 active:scale-98 text-slate-950 font-extrabold text-xl rounded-2xl shadow-lg transition-all flex items-center justify-center gap-2"
-            >
-              <CheckCircle2 className="w-7 h-7" />
-              <span>I'm Done / Clear</span>
-            </button>
+            <div className="flex flex-col gap-2 mt-5">
+              <button
+                onClick={() => {
+                  unlockAudio();
+                  speakText(activeRoutineOverlay.reminderMessage, currentLang);
+                }}
+                className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 active:scale-98 text-emerald-300 font-bold text-sm rounded-xl transition flex items-center justify-center gap-2 border border-slate-700"
+              >
+                <Volume2 className="w-4 h-4" />
+                <span>Repeat Voice Audio</span>
+              </button>
+
+              <button
+                onClick={() => setActiveRoutineOverlay(null)}
+                className="w-full py-4 bg-emerald-500 hover:bg-emerald-600 active:scale-98 text-slate-950 font-extrabold text-xl rounded-2xl shadow-lg transition-all flex items-center justify-center gap-2"
+              >
+                <CheckCircle2 className="w-7 h-7" />
+                <span>I'm Done / Clear</span>
+              </button>
+            </div>
           </div>
         )}
 
