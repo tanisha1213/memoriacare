@@ -159,12 +159,22 @@ export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi
       setStatusMsg('Preparing camera system...');
       const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
 
+      try {
+        if (faceapi.tf) {
+          await faceapi.tf.setBackend('webgl');
+          await faceapi.tf.ready();
+        }
+      } catch (tfErr) {
+        console.warn('WebGL backend fallback notice:', tfErr.message);
+      }
+
       await Promise.all([
         faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
         faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
         faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
       ]);
 
+      console.log('✅ Neural models loaded successfully from CDN');
       setStatusMsg('Starting camera feed...');
 
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -208,12 +218,21 @@ export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi
     let timerId;
 
     const processFrame = async () => {
-      if (!isCameraStarted || !videoRef.current || isProcessingRef.current) {
+      const video = videoRef.current;
+
+      if (!isCameraStarted || !video || isProcessingRef.current) {
         timerId = setTimeout(processFrame, 600);
         return;
       }
 
-      if (videoRef.current.videoWidth === 0 || videoRef.current.videoHeight === 0) {
+      // CRITICAL GUARD: Ensure video stream has loaded metadata and active frame dimensions
+      if (
+        video.paused ||
+        video.ended ||
+        video.readyState < 3 ||
+        video.videoWidth === 0 ||
+        video.videoHeight === 0
+      ) {
         timerId = setTimeout(processFrame, 600);
         return;
       }
@@ -223,7 +242,7 @@ export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi
       try {
         const detection = await faceapi
           .detectSingleFace(
-            videoRef.current,
+            video,
             new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.4 })
           )
           .withFaceLandmarks()
@@ -256,6 +275,10 @@ export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi
             }
           }
         });
+
+        console.log(
+          `🎯 Face detected! Closest Distance to ${bestMatch ? bestMatch.name : 'visitors'}: ${minDistance.toFixed(3)} | Threshold: 0.55`
+        );
 
         if (bestMatch && minDistance < 0.55) {
           unknownCounterRef.current = 0;
