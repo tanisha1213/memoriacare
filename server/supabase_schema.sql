@@ -46,12 +46,33 @@ create table if not exists families (
 create index if not exists idx_families_email on families(email);
 create index if not exists idx_families_family_code on families(family_code);
 
+-- 4. Routines Table Schema (Daily Timetable & Reminders)
+create table if not exists routines (
+  id uuid primary key default gen_random_uuid(),
+  family_code text not null,
+  activity_name text not null,
+  time text not null, -- "HH:MM" 24h format
+  reminder_message text not null,
+  repeat_frequency text default 'EVERY_DAY',
+  days_of_week text[] default array['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],
+  priority text default 'NORMAL',
+  voice_reminder boolean default true,
+  notify_caregiver boolean default true,
+  unack_timeout_minutes integer default 5,
+  is_paused boolean default false,
+  created_at timestamp with time zone default now()
+);
+
+create index if not exists idx_routines_family_code on routines(family_code);
+
 -- Enable Row Level Security (RLS)
 alter table visitors enable row level security;
 alter table unknown_queue enable row level security;
 alter table families enable row level security;
+alter table routines enable row level security;
 
 -- Public read/write policies
 create policy "Allow public read/write on visitors" on visitors for all using (true) with check (true);
 create policy "Allow public read/write on unknown_queue" on unknown_queue for all using (true) with check (true);
 create policy "Allow public read/write on families" on families for all using (true) with check (true);
+create policy "Allow public read/write on routines" on routines for all using (true) with check (true);
