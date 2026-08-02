@@ -5,6 +5,7 @@ require('dotenv').config();
 
 const visitorRoutes = require('./routes/visitorRoutes');
 const authRoutes = require('./routes/authRoutes');
+const safetyRoutes = require('./routes/safetyRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -47,6 +48,7 @@ app.get('/api/health', (req, res) => {
 });
 
 app.use('/api/auth', authRoutes);
+app.use('/api', safetyRoutes);
 app.use('/api', visitorRoutes);
 
 if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {

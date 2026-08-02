@@ -20,7 +20,9 @@ import {
   Pill,
   Coffee,
   Heart,
-  Activity
+  Activity,
+  ShieldCheck,
+  AlertTriangle
 } from 'lucide-react';
 
 function getRelativeTime(timestamp) {
@@ -128,6 +130,7 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
   const [unknownQueue, setUnknownQueue] = useState([]);
   const [registeredVisitors, setRegisteredVisitors] = useState([]);
   const [reminders, setReminders] = useState([]);
+  const [safetyEvents, setSafetyEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
   const [isPolling, setIsPolling] = useState(true);
@@ -221,20 +224,34 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
     }
   }, [familyCode]);
 
+  const fetchSafetyEvents = useCallback(async () => {
+    try {
+      const res = await axios.get(`/api/safety/history/${familyCode}`);
+      const list = res.data?.data || res.data || [];
+      if (Array.isArray(list)) {
+        setSafetyEvents(list);
+      }
+    } catch (err) {
+      console.error('Error fetching safety events:', err);
+    }
+  }, [familyCode]);
+
   useEffect(() => {
     prevUnknownsLengthRef.current = null;
     fetchUnknowns();
     fetchRegisteredVisitors();
+    fetchSafetyEvents();
 
     const interval = setInterval(() => {
       if (isPolling) {
         fetchUnknowns();
         fetchRegisteredVisitors();
+        fetchSafetyEvents();
       }
     }, 4000);
 
     return () => clearInterval(interval);
-  }, [fetchUnknowns, fetchRegisteredVisitors, isPolling, familyCode]);
+  }, [fetchUnknowns, fetchRegisteredVisitors, fetchSafetyEvents, isPolling, familyCode]);
 
   const handleInputChange = (id, field, value) => {
     setFormData((prev) => ({
@@ -330,6 +347,7 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
     const item = {
       id: `rem_${Date.now()}`,
       time: newReminder.time,
+      scheduledTime: newReminder.time,
       title: newReminder.title.trim(),
       note: newReminder.note.trim(),
       category: newReminder.category
@@ -337,6 +355,10 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
 
     const updated = [...reminders, item];
     saveReminders(updated);
+
+    // Also post to backend routines API
+    axios.post(`/api/routines/${familyCode}`, item).catch(() => {});
+
     setShowAddReminder(false);
     setNewReminder({ time: '09:00 AM', title: '', note: '', category: 'Medicine' });
     showToast('Daily reminder added successfully!', 'success');
@@ -345,6 +367,7 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
   const handleDeleteReminder = (id) => {
     const updated = reminders.filter((r) => r.id !== id);
     saveReminders(updated);
+    axios.delete(`/api/routines/${id}`).catch(() => {});
     showToast('Reminder removed.', 'info');
   };
 
@@ -393,7 +416,7 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
                 </span>
               </div>
               <p className="text-slate-400 text-sm mt-0.5">
-                Review visitor alerts, manage registered family members & daily timetables
+                Review visitor alerts, manage family members, daily timetables & safety telemetry logs
               </p>
             </div>
           </div>
@@ -425,6 +448,7 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
               onClick={() => {
                 fetchUnknowns();
                 fetchRegisteredVisitors();
+                fetchSafetyEvents();
               }}
               title="Manual Refresh"
               className="p-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 transition text-slate-300 hover:text-white border border-slate-700 cursor-pointer"
@@ -434,7 +458,7 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
           </div>
         </header>
 
-        {/* THREE DASHBOARD TABS */}
+        {/* DASHBOARD TABS */}
         <div className="flex items-center border-b border-slate-800 gap-4 overflow-x-auto pb-1">
           <button
             onClick={() => setActiveTab('QUEUE')}
@@ -478,6 +502,21 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
             Daily Timetable & Reminders
             <span className="px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 text-xs font-extrabold border border-indigo-500/30">
               {reminders.length}
+            </span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('SAFETY')}
+            className={`pb-3 px-2 font-bold text-sm sm:text-base flex items-center gap-2 border-b-2 transition-all cursor-pointer shrink-0 ${
+              activeTab === 'SAFETY'
+                ? 'border-emerald-500 text-emerald-400'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <ShieldCheck className="w-4 h-4 text-cyan-400" />
+            Safety History & Alerts
+            <span className="px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 text-xs font-extrabold border border-cyan-500/30">
+              {safetyEvents.length}
             </span>
           </button>
         </div>
@@ -809,14 +848,16 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
                       <div>
                         <div className="flex items-center gap-2">
                           <span className="px-2.5 py-0.5 rounded-md bg-slate-800 text-indigo-300 text-xs font-mono font-bold border border-slate-700">
-                            {rem.time}
+                            {rem.time || rem.scheduledTime}
                           </span>
                           <span className="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 text-[10px] font-bold border border-indigo-500/30">
                             {rem.category}
                           </span>
                         </div>
                         <h4 className="text-base font-bold text-white mt-1">{rem.title}</h4>
-                        {rem.note && <p className="text-xs text-slate-400 mt-0.5">{rem.note}</p>}
+                        {(rem.note || rem.contextNote) && (
+                          <p className="text-xs text-slate-400 mt-0.5">{rem.note || rem.contextNote}</p>
+                        )}
                       </div>
                     </div>
 
@@ -829,6 +870,74 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
                     </button>
                   </div>
                 ))}
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* TAB 4: SAFETY HISTORY & ALERTS */}
+        {activeTab === 'SAFETY' && (
+          <section className="space-y-6">
+            <div>
+              <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-cyan-400" />
+                🛡️ Passive Safety Event Log & Telemetry
+              </h2>
+              <p className="text-slate-400 text-xs mt-0.5">
+                Real-time edge ML telemetry history tracking fall detection, night activity, and boundary exits
+              </p>
+            </div>
+
+            {safetyEvents.length === 0 ? (
+              <div className="bg-slate-950/60 border border-slate-800/80 rounded-3xl p-12 flex flex-col items-center justify-center text-center">
+                <ShieldCheck className="w-10 h-10 text-cyan-400 mb-4" />
+                <h3 className="text-xl font-bold text-white mb-1">Safety Log Clear</h3>
+                <p className="text-slate-400 text-xs max-w-sm">
+                  No critical safety events or boundary alerts detected. Patient safety monitoring is active.
+                </p>
+              </div>
+            ) : (
+              <div className="bg-slate-950/90 border border-slate-800 rounded-2xl overflow-hidden shadow-xl backdrop-blur-md">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm text-slate-300">
+                    <thead className="bg-slate-900 text-slate-400 text-xs font-semibold uppercase tracking-wider border-b border-slate-800">
+                      <tr>
+                        <th className="p-4">Date & Time</th>
+                        <th className="p-4">Event Type</th>
+                        <th className="p-4">Level</th>
+                        <th className="p-4">Location Zone</th>
+                        <th className="p-4">Description</th>
+                        <th className="p-4">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60">
+                      {safetyEvents.map((evt) => (
+                        <tr key={evt._id || evt.id} className="hover:bg-slate-900/50 transition-colors">
+                          <td className="p-4 text-xs font-mono text-slate-400">
+                            {new Date(evt.timestamp).toLocaleString()}
+                          </td>
+                          <td className="p-4 font-bold text-white text-xs">{evt.eventType}</td>
+                          <td className="p-4">
+                            <span
+                              className={`px-2.5 py-1 rounded-full text-xs font-bold ${
+                                evt.alertLevel === 'Emergency'
+                                  ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                                  : evt.alertLevel === 'Warning'
+                                  ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                                  : 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
+                              }`}
+                            >
+                              {evt.alertLevel}
+                            </span>
+                          </td>
+                          <td className="p-4 text-xs">{evt.locationZone}</td>
+                          <td className="p-4 text-xs text-slate-300">{evt.description}</td>
+                          <td className="p-4 text-xs font-semibold text-emerald-400">{evt.status}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
           </section>
