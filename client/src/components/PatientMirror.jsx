@@ -82,8 +82,8 @@ export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi
           axios.get(`/api/visitors/${familyCode}`),
           axios.get(`/api/routines/${familyCode}`)
         ]);
-        if (visRes.data) setKnownVisitors(visRes.data);
-        if (routRes.data) setRoutines(routRes.data);
+        setKnownVisitors(Array.isArray(visRes.data) ? visRes.data : []);
+        setRoutines(Array.isArray(routRes.data) ? routRes.data : []);
         setIsDataLoaded(true);
       } catch (err) {
         console.warn('Data fetch warning:', err);

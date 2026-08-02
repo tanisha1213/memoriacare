@@ -155,7 +155,7 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
           axios.get(`/api/routines/${familyCode}`)
         ]);
 
-        const newQueue = queueRes.data || [];
+        const newQueue = Array.isArray(queueRes.data) ? queueRes.data : [];
         if (newQueue.length > prevQueueLengthRef.current && prevQueueLengthRef.current !== 0) {
           playAlertChime();
           showToast(`🚨 ALERT: New visitor detected! Review required.`, 'warning');
@@ -169,8 +169,8 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
         prevQueueLengthRef.current = newQueue.length;
 
         setUnknownQueue(newQueue);
-        setRegisteredVisitors(visRes.data || []);
-        setRoutines(routRes.data || []);
+        setRegisteredVisitors(Array.isArray(visRes.data) ? visRes.data : []);
+        setRoutines(Array.isArray(routRes.data) ? routRes.data : []);
       } catch (err) {
         console.error('Error fetching dashboard data:', err);
       } finally {
