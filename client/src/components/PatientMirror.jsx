@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as faceapi from '@vladmandic/face-api';
 import axios from 'axios';
-import { Bell, CheckCircle2, Clock, Pill, Sun, Coffee, Utensils, Heart, Moon, Volume2, VolumeX, Play } from 'lucide-react';
 
 function constructGreeting(visitor, lang) {
   const code = (lang || 'hi').toLowerCase().split('-')[0];
@@ -24,6 +23,20 @@ function constructGreeting(visitor, lang) {
   }
 }
 
+function getRoutineSpeechText(routine, lang) {
+  const code = (lang || 'hi').toLowerCase().split('-')[0];
+  const message = routine.reminderMessage || routine.activityName;
+  const timeStr = routine.time;
+
+  if (code === 'hi') {
+    return `नमस्ते। ${timeStr} बजे हैं। ${message}`;
+  } else if (code === 'mr') {
+    return `नमस्कार. ${timeStr} वाजले आहेत. ${message}`;
+  } else {
+    return `Good day. It is ${timeStr}. ${message}`;
+  }
+}
+
 function getUnknownAlertText(lang) {
   const code = (lang || 'hi').toLowerCase().split('-')[0];
   if (code === 'mr') {
@@ -35,18 +48,6 @@ function getUnknownAlertText(lang) {
   }
 }
 
-// Activity Icon Matcher
-function getActivityIcon(name = '') {
-  const lower = name.toLowerCase();
-  if (lower.includes('med') || lower.includes('pill') || lower.includes('दवा')) return <Pill className="w-10 h-10 text-emerald-400 animate-pulse" />;
-  if (lower.includes('wake') || lower.includes('morning') || lower.includes('सुबह')) return <Sun className="w-10 h-10 text-amber-400" />;
-  if (lower.includes('breakfast') || lower.includes('snack') || lower.includes('tea')) return <Coffee className="w-10 h-10 text-amber-500" />;
-  if (lower.includes('lunch') || lower.includes('dinner') || lower.includes('food')) return <Utensils className="w-10 h-10 text-sky-400" />;
-  if (lower.includes('walk') || lower.includes('family')) return <Heart className="w-10 h-10 text-rose-400" />;
-  if (lower.includes('sleep') || lower.includes('night') || lower.includes('रात')) return <Moon className="w-10 h-10 text-purple-400" />;
-  return <Bell className="w-10 h-10 text-amber-400 animate-bounce" />;
-}
-
 export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi-IN' }) {
   const videoRef = useRef(null);
   const [knownVisitors, setKnownVisitors] = useState([]);
@@ -55,8 +56,7 @@ export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi
   const [isCameraStarted, setIsCameraStarted] = useState(false);
   const [statusMsg, setStatusMsg] = useState('Initializing...');
   const [activeVisitorCard, setActiveVisitorCard] = useState(null);
-  const [activeRoutineOverlay, setActiveRoutineOverlay] = useState(null);
-  const [isAudioUnlocked, setIsAudioUnlocked] = useState(false);
+  const [activeRoutineCard, setActiveRoutineCard] = useState(null);
 
   const isProcessingRef = useRef(false);
   const spokenUserRef = useRef(null);
@@ -64,165 +64,180 @@ export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi
   const unknownCounterRef = useRef(0);
   const isSnapshotLockedRef = useRef(false);
 
-  // Audio stream speech function with user-gesture unlock
-  const speakText = (text, lang) => {
-    try {
-      const targetLang = (lang || 'hi').toLowerCase().split('-')[0];
-      const audioUrl = `/api/tts/stream?text=${encodeURIComponent(text)}&lang=${targetLang}`;
-      const audio = new Audio(audioUrl);
-
-      const playPromise = audio.play();
-      if (playPromise !== undefined) {
-        playPromise
-          .then(() => {
-            setIsAudioUnlocked(true);
-          })
-          .catch((e) => {
-            console.warn('Audio play notice (user interaction required):', e);
-            setIsAudioUnlocked(false);
-          });
-      }
-    } catch (err) {
-      console.warn('TTS streaming error:', err);
-    }
-  };
-
-  const unlockAudio = () => {
-    setIsAudioUnlocked(true);
-    speakText('Voice audio stream enabled.', currentLang);
-  };
-
-  // 1. Fetch Visitors & Routines
   useEffect(() => {
-    const fetchData = async () => {
+    const fetchVisitors = async () => {
       try {
-        const [visRes, routRes] = await Promise.all([
-          axios.get(`/api/visitors/${familyCode}`),
-          axios.get(`/api/routines/${familyCode}`)
-        ]);
-        setKnownVisitors(Array.isArray(visRes.data) ? visRes.data : []);
-        setRoutines(Array.isArray(routRes.data) ? routRes.data : []);
+        if (!familyCode) return;
+        const res = await axios.get(`/api/visitors/${familyCode}`);
+        const visitorsList = res.data?.data || res.data || [];
+        setKnownVisitors(visitorsList);
         setIsDataLoaded(true);
       } catch (err) {
-        console.warn('Data fetch warning:', err);
+        console.warn('Database fetch warning:', err.message);
         setIsDataLoaded(true);
       }
     };
 
-    fetchData();
-    const interval = setInterval(fetchData, 4000);
-    return () => clearInterval(interval);
+    const fetchRoutines = async () => {
+      try {
+        if (!familyCode) return;
+        const res = await axios.get(`/api/routines/${familyCode}`);
+        const data = res.data?.data || [];
+        if (Array.isArray(data)) {
+          setRoutines(data);
+        }
+      } catch (e) {}
+    };
+
+    fetchVisitors();
+    fetchRoutines();
+
+    const pollInterval = setInterval(() => {
+      fetchVisitors();
+      fetchRoutines();
+    }, 4000);
+
+    return () => clearInterval(pollInterval);
   }, [familyCode]);
 
-  // 2. Scheduled Routine 15s Clock Checker Loop
+  // Automated Routine Time Checker Loop (Runs every 5 seconds)
   useEffect(() => {
-    const checkRoutines = () => {
+    const checkRoutineTimes = () => {
       if (!routines || routines.length === 0) return;
 
       const now = new Date();
-      const currentHHMM = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      const hours = String(now.getHours()).padStart(2, '0');
+      const minutes = String(now.getMinutes()).padStart(2, '0');
+      const currentTimeStr = `${hours}:${minutes}`;
 
-      // Match routine by time that is active and not paused
-      const matched = routines.find((r) => r.time === currentHHMM && !r.isPaused);
+      const matchedRoutine = routines.find((r) => {
+        if (!r.isActive) return false;
+        if (r.time !== currentTimeStr) return false;
 
-      if (matched) {
-        const routineId = `${matched._id || matched.id}_${currentHHMM}`;
-        if (spokenRoutineRef.current !== routineId) {
-          spokenRoutineRef.current = routineId;
-          setActiveRoutineOverlay(matched);
-
-          // Speak vocal reminder automatically
-          if (matched.voiceReminder !== false) {
-            console.log('🗣️ Speaking Scheduled Routine Reminder:', matched.reminderMessage);
-            speakText(matched.reminderMessage, currentLang);
+        if (r.lastAcknowledgedAt) {
+          const ackDate = new Date(r.lastAcknowledgedAt);
+          if (ackDate.toDateString() === now.toDateString()) {
+            return false;
           }
+        }
+        return true;
+      });
 
-          // Schedule unacknowledged alert escalation if notification enabled
-          if (matched.notifyCaregiver && matched.priority !== 'NORMAL') {
-            const timeoutMs = (matched.unackTimeoutMinutes || 2) * 60 * 1000;
-            setTimeout(() => {
-              // Check if overlay is still open / unacknowledged
-              setActiveRoutineOverlay((current) => {
-                if (current && (current._id === matched._id || current.id === matched.id)) {
-                  axios.post('/api/routines/unacknowledged-alert', {
-                    familyCode,
-                    activityName: matched.activityName,
-                    reminderMessage: matched.reminderMessage,
-                    priority: matched.priority
-                  }).catch(() => {});
-                }
-                return current;
-              });
-            }, timeoutMs);
+      if (matchedRoutine) {
+        setActiveRoutineCard(matchedRoutine);
+        const speechKey = `${matchedRoutine._id}_${currentTimeStr}`;
+        if (spokenRoutineRef.current !== speechKey) {
+          spokenRoutineRef.current = speechKey;
+          if (matchedRoutine.voiceEnabled) {
+            const speechText = getRoutineSpeechText(matchedRoutine, currentLang);
+            console.log('🗣️ Speaking Routine Reminder:', speechText);
+            speakText(speechText, currentLang);
           }
         }
       }
     };
 
-    checkRoutines();
-    const routineTimer = setInterval(checkRoutines, 15000);
-    return () => clearInterval(routineTimer);
-  }, [routines, currentLang, familyCode]);
+    checkRoutineTimes();
+    const routineInterval = setInterval(checkRoutineTimes, 5000);
+    return () => clearInterval(routineInterval);
+  }, [routines, currentLang]);
 
-  // 3. Initialize Face API Neural Models & Camera
-  useEffect(() => {
-    let isMounted = true;
-
-    const initCameraAndAI = async () => {
-      try {
-        setStatusMsg('Preparing camera system...');
-        const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
-        await Promise.all([
-          faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-          faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-          faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
-        ]);
-
-        if (!isMounted) return;
-
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          setIsCameraStarted(true);
-          setStatusMsg('Camera Active');
-        }
-      } catch (err) {
-        console.error('Camera/AI init error:', err);
-        if (isMounted) setStatusMsg('Camera access standard check');
-      }
-    };
-
-    if (isDataLoaded) {
-      initCameraAndAI();
+  const handleAcknowledgeRoutine = async (id) => {
+    try {
+      setActiveRoutineCard(null);
+      await axios.patch(`/api/routines/ack/${id}`);
+    } catch (e) {
+      console.warn('Error acknowledging routine:', e);
     }
+  };
 
-    return () => {
-      isMounted = false;
-    };
+  const startMirrorSystem = async () => {
+    if (isCameraStarted) return;
+    setIsCameraStarted(true);
+
+    try {
+      setStatusMsg('Preparing camera system...');
+      const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
+
+      await Promise.all([
+        faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+        faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+        faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
+      ]);
+
+      setStatusMsg('Starting camera feed...');
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+        audio: false
+      });
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.onloadedmetadata = async () => {
+          try {
+            await videoRef.current.play();
+            setStatusMsg('Camera Active & Monitoring');
+          } catch (pErr) {
+            console.error('Play error:', pErr);
+          }
+        };
+      }
+    } catch (err) {
+      console.error('Camera Auto-Start Error:', err);
+      setStatusMsg(`Camera Error: ${err.message}. Check browser permissions.`);
+    }
+  };
+
+  useEffect(() => {
+    if (isDataLoaded && !isCameraStarted) {
+      startMirrorSystem();
+    }
   }, [isDataLoaded]);
 
-  // 4. Main 600ms Recognition Loop
+  const speakText = (text, lang) => {
+    const targetLang = (lang || 'hi').toLowerCase().split('-')[0];
+    const audioUrl = `/api/tts/stream?text=${encodeURIComponent(text)}&lang=${targetLang}`;
+    if (window.activeAudioPlayer) window.activeAudioPlayer.pause();
+    const audio = new Audio(audioUrl);
+    window.activeAudioPlayer = audio;
+    audio.play().catch((e) => console.error('Audio playback error:', e));
+  };
+
   useEffect(() => {
-    let timerId = null;
+    let timerId;
 
     const processFrame = async () => {
-      if (!videoRef.current || isProcessingRef.current || !isCameraStarted) return;
+      if (!isCameraStarted || !videoRef.current || isProcessingRef.current) {
+        timerId = setTimeout(processFrame, 600);
+        return;
+      }
+
+      if (videoRef.current.videoWidth === 0 || videoRef.current.videoHeight === 0) {
+        timerId = setTimeout(processFrame, 600);
+        return;
+      }
+
       isProcessingRef.current = true;
 
       try {
         const detection = await faceapi
-          .detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.4 }))
+          .detectSingleFace(
+            videoRef.current,
+            new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.4 })
+          )
           .withFaceLandmarks()
           .withFaceDescriptor();
 
         if (!detection) {
+          spokenUserRef.current = null;
           setActiveVisitorCard(null);
           isProcessingRef.current = false;
           timerId = setTimeout(processFrame, 600);
           return;
         }
 
-        const liveDescriptor = detection.descriptor;
+        const liveDescriptor = Array.from(detection.descriptor);
         let bestMatch = null;
         let minDistance = 1.0;
 
@@ -308,38 +323,6 @@ export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-slate-950 p-4 text-slate-100 font-sans">
       <div className="w-full max-w-md flex flex-col items-center">
-        {/* AUDIO AUTOPLAY UNLOCK / TEST BAR */}
-        <div className="w-full mb-3 flex items-center justify-between bg-slate-900/80 p-3 rounded-2xl border border-slate-800 backdrop-blur-md">
-          <div className="flex items-center gap-2 text-xs font-semibold">
-            {isAudioUnlocked ? (
-              <span className="flex items-center gap-1.5 text-emerald-400">
-                <Volume2 className="w-4 h-4 animate-pulse" /> Voice Audio Enabled
-              </span>
-            ) : (
-              <span className="flex items-center gap-1.5 text-amber-400">
-                <VolumeX className="w-4 h-4" /> Tap to Enable Voice Audio
-              </span>
-            )}
-          </div>
-
-          <button
-            onClick={() => {
-              unlockAudio();
-              if (routines && routines.length > 0) {
-                const r = routines[0];
-                speakText(r.reminderMessage || 'Testing voice reminder audio', currentLang);
-              } else {
-                speakText('Good morning. It is 9:00 AM. It is time for your medicine.', currentLang);
-              }
-            }}
-            className="px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs font-bold rounded-xl transition flex items-center gap-1.5 active:scale-95"
-          >
-            <Play className="w-3.5 h-3.5 fill-current" />
-            <span>Test Voice Audio</span>
-          </button>
-        </div>
-
-        {/* VIDEO DISPLAY CONTAINER */}
         <div className="relative w-full rounded-2xl overflow-hidden border-4 border-slate-800 shadow-2xl bg-slate-900 min-h-[320px] flex items-center justify-center">
           <video
             ref={videoRef}
@@ -353,50 +336,7 @@ export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi
 
         <p className="mt-3 text-slate-400 text-xs font-medium uppercase tracking-wider">{statusMsg}</p>
 
-        {/* SCHEDULED ROUTINE REMINDER OVERLAY (LARGE ACCESSIBLE CARD) */}
-        {activeRoutineOverlay && (
-          <div className="mt-4 p-6 bg-slate-900/95 backdrop-blur-xl border-2 border-emerald-500 rounded-3xl text-center w-full shadow-2xl animate-in zoom-in-95 duration-300">
-            <div className="flex justify-center mb-3">
-              <div className="p-3 bg-emerald-500/20 border border-emerald-500/40 rounded-2xl">
-                {getActivityIcon(activeRoutineOverlay.activityName)}
-              </div>
-            </div>
-
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-500/10 text-emerald-400 rounded-full text-xs font-bold uppercase tracking-wider mb-2">
-              <Clock className="w-3.5 h-3.5" />
-              <span>{activeRoutineOverlay.time} Scheduled Activity</span>
-            </div>
-
-            <h2 className="text-3xl font-extrabold text-white tracking-tight">{activeRoutineOverlay.activityName}</h2>
-            <p className="text-slate-200 font-medium text-lg mt-2 leading-relaxed bg-slate-800/60 p-4 rounded-2xl border border-slate-700/60">
-              "{activeRoutineOverlay.reminderMessage}"
-            </p>
-
-            <div className="flex flex-col gap-2 mt-5">
-              <button
-                onClick={() => {
-                  unlockAudio();
-                  speakText(activeRoutineOverlay.reminderMessage, currentLang);
-                }}
-                className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 active:scale-98 text-emerald-300 font-bold text-sm rounded-xl transition flex items-center justify-center gap-2 border border-slate-700"
-              >
-                <Volume2 className="w-4 h-4" />
-                <span>Repeat Voice Audio</span>
-              </button>
-
-              <button
-                onClick={() => setActiveRoutineOverlay(null)}
-                className="w-full py-4 bg-emerald-500 hover:bg-emerald-600 active:scale-98 text-slate-950 font-extrabold text-xl rounded-2xl shadow-lg transition-all flex items-center justify-center gap-2"
-              >
-                <CheckCircle2 className="w-7 h-7" />
-                <span>I'm Done / Clear</span>
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* VISITOR RECOGNITION CUE CARD FOR PATIENT */}
-        {activeVisitorCard && !activeRoutineOverlay && (
+        {activeVisitorCard && (
           <div className="mt-4 p-5 bg-slate-900/90 backdrop-blur-md border border-slate-700 rounded-2xl text-center w-full shadow-2xl animate-in fade-in">
             <h2 className="text-2xl font-bold text-white">{activeVisitorCard.name}</h2>
             <p className="text-emerald-400 font-semibold text-lg">{activeVisitorCard.relationship}</p>
@@ -405,6 +345,53 @@ export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi
                 "{activeVisitorCard.contextNote}"
               </p>
             )}
+          </div>
+        )}
+
+        {/* SCHEDULED ROUTINE & REMINDER CUE CARD FOR PATIENT */}
+        {activeRoutineCard && (
+          <div
+            className={`mt-4 p-6 rounded-3xl border text-center w-full shadow-2xl animate-in fade-in ${
+              activeRoutineCard.priority === 'URGENT'
+                ? 'bg-rose-950/90 border-rose-500 shadow-rose-500/30'
+                : activeRoutineCard.priority === 'IMPORTANT'
+                ? 'bg-amber-950/90 border-amber-500 shadow-amber-500/30'
+                : 'bg-indigo-950/90 border-indigo-500 shadow-indigo-500/30'
+            }`}
+          >
+            <div className="flex items-center justify-center gap-2 mb-1">
+              <span className="text-3xl font-black font-mono text-white tracking-wider">
+                ⏰ {activeRoutineCard.time}
+              </span>
+              <span
+                className={`px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${
+                  activeRoutineCard.priority === 'URGENT'
+                    ? 'bg-rose-500 text-white animate-pulse'
+                    : activeRoutineCard.priority === 'IMPORTANT'
+                    ? 'bg-amber-500 text-slate-950'
+                    : 'bg-indigo-500 text-white'
+                }`}
+              >
+                {activeRoutineCard.priority}
+              </span>
+            </div>
+
+            <h2 className="text-3xl font-black text-white mt-1 tracking-tight">
+              {activeRoutineCard.activityName}
+            </h2>
+
+            {activeRoutineCard.reminderMessage && (
+              <p className="text-slate-200 text-base mt-2 font-medium bg-slate-900/60 p-3 rounded-2xl border border-white/10">
+                "{activeRoutineCard.reminderMessage}"
+              </p>
+            )}
+
+            <button
+              onClick={() => handleAcknowledgeRoutine(activeRoutineCard._id)}
+              className="mt-4 w-full py-3.5 px-6 rounded-2xl bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-slate-950 font-black text-lg shadow-xl shadow-emerald-500/40 transition-all cursor-pointer flex items-center justify-center gap-2"
+            >
+              <span>✅ I Done This / Completed</span>
+            </button>
           </div>
         )}
       </div>
