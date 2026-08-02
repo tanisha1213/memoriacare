@@ -33,6 +33,30 @@ function saveLocalRoutines(list) {
   }
 }
 
+// Persistent Local Unknown Queue File DB Backup
+const UNKNOWNS_FILE = process.env.VERCEL
+  ? path.join('/tmp', 'unknowns_db.json')
+  : path.join(__dirname, '../unknowns_db.json');
+
+function loadLocalUnknowns() {
+  try {
+    if (fs.existsSync(UNKNOWNS_FILE)) {
+      return JSON.parse(fs.readFileSync(UNKNOWNS_FILE, 'utf8'));
+    }
+  } catch (e) {
+    console.warn('Error loading unknowns_db.json:', e.message);
+  }
+  return [];
+}
+
+function saveLocalUnknowns(list) {
+  try {
+    fs.writeFileSync(UNKNOWNS_FILE, JSON.stringify(list, null, 2), 'utf8');
+  } catch (e) {
+    console.warn('Error saving unknowns_db.json:', e.message);
+  }
+}
+
 const DEFAULT_PRESET_ROUTINES = [
   { activityName: 'Wake Up', time: '07:00', reminderMessage: 'Good morning. Time to wake up and start your day.', frequency: 'EVERYDAY', priority: 'NORMAL', voiceEnabled: true, caregiverNotify: false, timeoutMinutes: 5, isActive: true },
   { activityName: 'Brush Teeth', time: '07:30', reminderMessage: 'Time to brush your teeth.', frequency: 'EVERYDAY', priority: 'NORMAL', voiceEnabled: true, caregiverNotify: false, timeoutMinutes: 5, isActive: true },
@@ -118,9 +142,15 @@ router.get('/visitors/:familyCode', async (req, res) => {
 
 const getUnknownsHandler = async (req, res) => {
   const { familyCode } = req.params;
+  let queue = [];
 
-  try {
-    if (supabase) {
+  // 1. Load local file DB
+  const localList = loadLocalUnknowns();
+  queue = localList.filter((item) => item.familyCode === familyCode && item.status === 'PENDING_REVIEW');
+
+  // 2. Check Supabase
+  if (supabase) {
+    try {
       const { data, error } = await supabase
         .from('unknown_queue')
         .select('*')
@@ -128,7 +158,7 @@ const getUnknownsHandler = async (req, res) => {
         .eq('status', 'PENDING_REVIEW')
         .order('created_at', { ascending: false });
 
-      if (!error && data) {
+      if (!error && data && data.length > 0) {
         const formatted = data.map((item) => ({
           _id: item.id,
           familyCode: item.family_code,
@@ -137,11 +167,16 @@ const getUnknownsHandler = async (req, res) => {
           status: item.status,
           timestamp: item.created_at
         }));
-        return res.status(200).json({ success: true, count: formatted.length, data: formatted });
-      }
-    }
-  } catch (sbErr) {}
 
+        const existingIds = new Set(queue.map((q) => q._id));
+        formatted.forEach((f) => {
+          if (!existingIds.has(f._id)) queue.push(f);
+        });
+      }
+    } catch (sbErr) {}
+  }
+
+  // 3. Check Mongoose
   if (mongoose.connection.readyState === 1) {
     try {
       const mongooseQueue = await UnknownQueue.find({ familyCode, status: 'PENDING_REVIEW' })
@@ -149,14 +184,32 @@ const getUnknownsHandler = async (req, res) => {
         .maxTimeMS(1000)
         .exec();
 
-      return res.status(200).json({ success: true, count: mongooseQueue.length, data: mongooseQueue });
+      const existingIds = new Set(queue.map((q) => q._id));
+      mongooseQueue.forEach((m) => {
+        const mId = m._id.toString();
+        if (!existingIds.has(mId)) {
+          queue.push({
+            _id: mId,
+            familyCode: m.familyCode,
+            photoThumbnail: m.photoThumbnail,
+            embedding: sanitizeEmbedding(m.embedding),
+            status: m.status,
+            timestamp: m.timestamp
+          });
+        }
+      });
     } catch (mgErr) {}
   }
 
-  const filtered = memoryUnknownQueue.filter(
-    (item) => item.familyCode === familyCode && item.status === 'PENDING_REVIEW'
-  );
-  return res.status(200).json({ success: true, count: filtered.length, data: filtered });
+  // 4. Fallback memory queue
+  const existingIds = new Set(queue.map((q) => q._id));
+  memoryUnknownQueue.forEach((mem) => {
+    if (mem.familyCode === familyCode && mem.status === 'PENDING_REVIEW' && !existingIds.has(mem._id)) {
+      queue.push(mem);
+    }
+  });
+
+  return res.status(200).json({ success: true, count: queue.length, data: queue });
 };
 
 router.get('/queue/:familyCode', getUnknownsHandler);
@@ -182,7 +235,11 @@ const postUnknownHandler = async (req, res) => {
       timestamp: new Date().toISOString()
     };
 
+    // Save to memory and local file DB
     memoryUnknownQueue.unshift(newQueueItem);
+    const localList = loadLocalUnknowns();
+    localList.unshift(newQueueItem);
+    saveLocalUnknowns(localList);
 
     if (supabase) {
       supabase
@@ -196,7 +253,7 @@ const postUnknownHandler = async (req, res) => {
           }
         ])
         .then(() => {})
-        .catch(() => {});
+        .catch((e) => console.warn('Supabase queue insert notice:', e.message));
     }
 
     if (mongoose.connection.readyState === 1) {
@@ -208,9 +265,10 @@ const postUnknownHandler = async (req, res) => {
         timestamp: new Date()
       })
         .save()
-        .catch(() => {});
+        .catch((e) => console.warn('Mongoose queue insert notice:', e.message));
     }
 
+    console.log(`📸 [SNAPSHOT CAPTURED] Enqueued unknown snapshot for family code ${familyCode}`);
     return res.status(200).json({ success: true, id: newQueueItem._id, data: newQueueItem });
   } catch (err) {
     console.error('Queue Post Error:', err);
