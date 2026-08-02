@@ -10,30 +10,22 @@ function constructGreeting(visitor, lang) {
 
   if (code === 'hi') {
     let text = `यह आपके ${relation}, ${name} हैं।`;
-    if (note) text += ` याद दिला दें, ${note}`;
+    if (note) {
+      text += ` याद दिला दें, ${note}`;
+    }
     return text;
   } else if (code === 'mr') {
     let text = `हे तुमचे ${relation}, ${name} आहेत।`;
-    if (note) text += ` आठवण ठेवा, ${note}`;
+    if (note) {
+      text += ` आठवण ठेवा, ${note}`;
+    }
     return text;
   } else {
     let text = `This is your ${relation}, ${name}.`;
-    if (note) text += ` Quick reminder: ${note}`;
+    if (note) {
+      text += ` Quick reminder: ${note}`;
+    }
     return text;
-  }
-}
-
-function getRoutineSpeechText(routine, lang) {
-  const code = (lang || 'hi').toLowerCase().split('-')[0];
-  const message = routine.reminderMessage || routine.activityName;
-  const timeStr = routine.time;
-
-  if (code === 'hi') {
-    return `नमस्ते। ${timeStr} बजे हैं। ${message}`;
-  } else if (code === 'mr') {
-    return `नमस्कार. ${timeStr} वाजले आहेत. ${message}`;
-  } else {
-    return `Good day. It is ${timeStr}. ${message}`;
   }
 }
 
@@ -51,16 +43,13 @@ function getUnknownAlertText(lang) {
 export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi-IN' }) {
   const videoRef = useRef(null);
   const [knownVisitors, setKnownVisitors] = useState([]);
-  const [routines, setRoutines] = useState([]);
   const [isDataLoaded, setIsDataLoaded] = useState(false);
   const [isCameraStarted, setIsCameraStarted] = useState(false);
   const [statusMsg, setStatusMsg] = useState('Initializing...');
   const [activeVisitorCard, setActiveVisitorCard] = useState(null);
-  const [activeRoutineCard, setActiveRoutineCard] = useState(null);
 
   const isProcessingRef = useRef(false);
   const spokenUserRef = useRef(null);
-  const spokenRoutineRef = useRef(null);
   const unknownCounterRef = useRef(0);
   const isSnapshotLockedRef = useRef(false);
 
@@ -78,78 +67,11 @@ export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi
       }
     };
 
-    const fetchRoutines = async () => {
-      try {
-        if (!familyCode) return;
-        const res = await axios.get(`/api/routines/${familyCode}`);
-        const data = res.data?.data || [];
-        if (Array.isArray(data)) {
-          setRoutines(data);
-        }
-      } catch (e) {}
-    };
-
     fetchVisitors();
-    fetchRoutines();
 
-    const pollInterval = setInterval(() => {
-      fetchVisitors();
-      fetchRoutines();
-    }, 4000);
-
+    const pollInterval = setInterval(fetchVisitors, 4000);
     return () => clearInterval(pollInterval);
   }, [familyCode]);
-
-  // Automated Routine Time Checker Loop (Runs every 5 seconds)
-  useEffect(() => {
-    const checkRoutineTimes = () => {
-      if (!routines || routines.length === 0) return;
-
-      const now = new Date();
-      const hours = String(now.getHours()).padStart(2, '0');
-      const minutes = String(now.getMinutes()).padStart(2, '0');
-      const currentTimeStr = `${hours}:${minutes}`;
-
-      const matchedRoutine = routines.find((r) => {
-        if (!r.isActive) return false;
-        if (r.time !== currentTimeStr) return false;
-
-        if (r.lastAcknowledgedAt) {
-          const ackDate = new Date(r.lastAcknowledgedAt);
-          if (ackDate.toDateString() === now.toDateString()) {
-            return false;
-          }
-        }
-        return true;
-      });
-
-      if (matchedRoutine) {
-        setActiveRoutineCard(matchedRoutine);
-        const speechKey = `${matchedRoutine._id}_${currentTimeStr}`;
-        if (spokenRoutineRef.current !== speechKey) {
-          spokenRoutineRef.current = speechKey;
-          if (matchedRoutine.voiceEnabled) {
-            const speechText = getRoutineSpeechText(matchedRoutine, currentLang);
-            console.log('🗣️ Speaking Routine Reminder:', speechText);
-            speakText(speechText, currentLang);
-          }
-        }
-      }
-    };
-
-    checkRoutineTimes();
-    const routineInterval = setInterval(checkRoutineTimes, 5000);
-    return () => clearInterval(routineInterval);
-  }, [routines, currentLang]);
-
-  const handleAcknowledgeRoutine = async (id) => {
-    try {
-      setActiveRoutineCard(null);
-      await axios.patch(`/api/routines/ack/${id}`);
-    } catch (e) {
-      console.warn('Error acknowledging routine:', e);
-    }
-  };
 
   const startMirrorSystem = async () => {
     if (isCameraStarted) return;
@@ -159,22 +81,12 @@ export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi
       setStatusMsg('Preparing camera system...');
       const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
 
-      try {
-        if (faceapi.tf) {
-          await faceapi.tf.setBackend('webgl');
-          await faceapi.tf.ready();
-        }
-      } catch (tfErr) {
-        console.warn('WebGL backend fallback notice:', tfErr.message);
-      }
-
       await Promise.all([
         faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
         faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
         faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
       ]);
 
-      console.log('✅ Neural models loaded successfully from CDN');
       setStatusMsg('Starting camera feed...');
 
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -218,21 +130,12 @@ export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi
     let timerId;
 
     const processFrame = async () => {
-      const video = videoRef.current;
-
-      if (!isCameraStarted || !video || isProcessingRef.current) {
+      if (!isCameraStarted || !videoRef.current || isProcessingRef.current) {
         timerId = setTimeout(processFrame, 600);
         return;
       }
 
-      // CRITICAL GUARD: Ensure video stream has loaded metadata and active frame dimensions
-      if (
-        video.paused ||
-        video.ended ||
-        video.readyState < 3 ||
-        video.videoWidth === 0 ||
-        video.videoHeight === 0
-      ) {
+      if (videoRef.current.videoWidth === 0 || videoRef.current.videoHeight === 0) {
         timerId = setTimeout(processFrame, 600);
         return;
       }
@@ -242,7 +145,7 @@ export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi
       try {
         const detection = await faceapi
           .detectSingleFace(
-            video,
+            videoRef.current,
             new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.4 })
           )
           .withFaceLandmarks()
@@ -275,10 +178,6 @@ export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi
             }
           }
         });
-
-        console.log(
-          `🎯 Face detected! Closest Distance to ${bestMatch ? bestMatch.name : 'visitors'}: ${minDistance.toFixed(3)} | Threshold: 0.55`
-        );
 
         if (bestMatch && minDistance < 0.55) {
           unknownCounterRef.current = 0;
@@ -368,53 +267,6 @@ export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi
                 "{activeVisitorCard.contextNote}"
               </p>
             )}
-          </div>
-        )}
-
-        {/* SCHEDULED ROUTINE & REMINDER CUE CARD FOR PATIENT */}
-        {activeRoutineCard && (
-          <div
-            className={`mt-4 p-6 rounded-3xl border text-center w-full shadow-2xl animate-in fade-in ${
-              activeRoutineCard.priority === 'URGENT'
-                ? 'bg-rose-950/90 border-rose-500 shadow-rose-500/30'
-                : activeRoutineCard.priority === 'IMPORTANT'
-                ? 'bg-amber-950/90 border-amber-500 shadow-amber-500/30'
-                : 'bg-indigo-950/90 border-indigo-500 shadow-indigo-500/30'
-            }`}
-          >
-            <div className="flex items-center justify-center gap-2 mb-1">
-              <span className="text-3xl font-black font-mono text-white tracking-wider">
-                ⏰ {activeRoutineCard.time}
-              </span>
-              <span
-                className={`px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${
-                  activeRoutineCard.priority === 'URGENT'
-                    ? 'bg-rose-500 text-white animate-pulse'
-                    : activeRoutineCard.priority === 'IMPORTANT'
-                    ? 'bg-amber-500 text-slate-950'
-                    : 'bg-indigo-500 text-white'
-                }`}
-              >
-                {activeRoutineCard.priority}
-              </span>
-            </div>
-
-            <h2 className="text-3xl font-black text-white mt-1 tracking-tight">
-              {activeRoutineCard.activityName}
-            </h2>
-
-            {activeRoutineCard.reminderMessage && (
-              <p className="text-slate-200 text-base mt-2 font-medium bg-slate-900/60 p-3 rounded-2xl border border-white/10">
-                "{activeRoutineCard.reminderMessage}"
-              </p>
-            )}
-
-            <button
-              onClick={() => handleAcknowledgeRoutine(activeRoutineCard._id)}
-              className="mt-4 w-full py-3.5 px-6 rounded-2xl bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-slate-950 font-black text-lg shadow-xl shadow-emerald-500/40 transition-all cursor-pointer flex items-center justify-center gap-2"
-            >
-              <span>✅ I Done This / Completed</span>
-            </button>
           </div>
         )}
       </div>

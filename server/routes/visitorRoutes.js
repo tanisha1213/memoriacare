@@ -2,73 +2,12 @@ const express = require('express');
 const https = require('https');
 const mongoose = require('mongoose');
 const router = express.Router();
-const Routine = require('../models/Routine');
-const fs = require('fs');
-const path = require('path');
+const Visitor = require('../models/Visitor');
+const UnknownQueue = require('../models/UnknownQueue');
+const supabase = require('../supabaseClient');
 
 const memoryVisitors = [];
 const memoryUnknownQueue = [];
-
-// Persistent Local Routines File DB Backup
-const ROUTINES_FILE = process.env.VERCEL
-  ? path.join('/tmp', 'routines_db.json')
-  : path.join(__dirname, '../routines_db.json');
-
-function loadLocalRoutines() {
-  try {
-    if (fs.existsSync(ROUTINES_FILE)) {
-      return JSON.parse(fs.readFileSync(ROUTINES_FILE, 'utf8'));
-    }
-  } catch (e) {
-    console.warn('Error loading routines_db.json:', e.message);
-  }
-  return [];
-}
-
-function saveLocalRoutines(list) {
-  try {
-    fs.writeFileSync(ROUTINES_FILE, JSON.stringify(list, null, 2), 'utf8');
-  } catch (e) {
-    console.warn('Error saving routines_db.json:', e.message);
-  }
-}
-
-// Persistent Local Unknown Queue File DB Backup
-const UNKNOWNS_FILE = process.env.VERCEL
-  ? path.join('/tmp', 'unknowns_db.json')
-  : path.join(__dirname, '../unknowns_db.json');
-
-function loadLocalUnknowns() {
-  try {
-    if (fs.existsSync(UNKNOWNS_FILE)) {
-      return JSON.parse(fs.readFileSync(UNKNOWNS_FILE, 'utf8'));
-    }
-  } catch (e) {
-    console.warn('Error loading unknowns_db.json:', e.message);
-  }
-  return [];
-}
-
-function saveLocalUnknowns(list) {
-  try {
-    fs.writeFileSync(UNKNOWNS_FILE, JSON.stringify(list, null, 2), 'utf8');
-  } catch (e) {
-    console.warn('Error saving unknowns_db.json:', e.message);
-  }
-}
-
-const DEFAULT_PRESET_ROUTINES = [
-  { activityName: 'Wake Up', time: '07:00', reminderMessage: 'Good morning. Time to wake up and start your day.', frequency: 'EVERYDAY', priority: 'NORMAL', voiceEnabled: true, caregiverNotify: false, timeoutMinutes: 5, isActive: true },
-  { activityName: 'Brush Teeth', time: '07:30', reminderMessage: 'Time to brush your teeth.', frequency: 'EVERYDAY', priority: 'NORMAL', voiceEnabled: true, caregiverNotify: false, timeoutMinutes: 5, isActive: true },
-  { activityName: 'Breakfast', time: '08:00', reminderMessage: 'Time to enjoy your breakfast.', frequency: 'EVERYDAY', priority: 'NORMAL', voiceEnabled: true, caregiverNotify: false, timeoutMinutes: 5, isActive: true },
-  { activityName: 'Medicine Reminder', time: '09:00', reminderMessage: 'It is 9:00 AM. It is time for your morning medicine.', frequency: 'EVERYDAY', priority: 'URGENT', voiceEnabled: true, caregiverNotify: true, timeoutMinutes: 5, isActive: true },
-  { activityName: 'Morning Walk', time: '10:30', reminderMessage: 'Time for a gentle morning walk.', frequency: 'EVERYDAY', priority: 'NORMAL', voiceEnabled: true, caregiverNotify: false, timeoutMinutes: 5, isActive: true },
-  { activityName: 'Lunch', time: '13:00', reminderMessage: 'Time for lunch.', frequency: 'EVERYDAY', priority: 'NORMAL', voiceEnabled: true, caregiverNotify: false, timeoutMinutes: 5, isActive: true },
-  { activityName: 'Afternoon Snack', time: '16:00', reminderMessage: 'Time for a light snack and a glass of water.', frequency: 'EVERYDAY', priority: 'NORMAL', voiceEnabled: true, caregiverNotify: false, timeoutMinutes: 5, isActive: true },
-  { activityName: 'Family Time', time: '18:00', reminderMessage: 'Time to connect with your family.', frequency: 'EVERYDAY', priority: 'NORMAL', voiceEnabled: true, caregiverNotify: false, timeoutMinutes: 5, isActive: true },
-  { activityName: 'Dinner', time: '20:00', reminderMessage: 'Time for dinner.', frequency: 'EVERYDAY', priority: 'NORMAL', voiceEnabled: true, caregiverNotify: false, timeoutMinutes: 5, isActive: true },
-  { activityName: 'Prepare for Sleep', time: '21:30', reminderMessage: 'Time to relax and prepare for a restful sleep.', frequency: 'EVERYDAY', priority: 'IMPORTANT', voiceEnabled: true, caregiverNotify: false, timeoutMinutes: 5, isActive: true }
-];
 
 function calculateEuclideanDistance(vecA, vecB) {
   if (!vecA || !vecB || vecA.length !== vecB.length) return Infinity;
@@ -141,90 +80,46 @@ router.get('/visitors/:familyCode', async (req, res) => {
 });
 
 const getUnknownsHandler = async (req, res) => {
-  const familyCode = (req.params.familyCode || req.query.familyCode || 'FAM123').trim();
-  let queue = [];
+  const { familyCode } = req.params;
 
-  // 1. Load local file DB
-  const localList = loadLocalUnknowns();
-  queue = localList.filter(
-    (item) =>
-      item.status === 'PENDING_REVIEW' &&
-      (!item.familyCode || item.familyCode === familyCode || item.familyCode === 'FAM123' || familyCode === 'FAM123')
-  );
-
-  // 2. Check Supabase
-  if (supabase) {
-    try {
+  try {
+    if (supabase) {
       const { data, error } = await supabase
         .from('unknown_queue')
         .select('*')
+        .eq('family_code', familyCode)
         .eq('status', 'PENDING_REVIEW')
         .order('created_at', { ascending: false });
 
-      if (!error && data && data.length > 0) {
-        const formatted = data
-          .filter(
-            (item) =>
-              !item.family_code || item.family_code === familyCode || item.family_code === 'FAM123' || familyCode === 'FAM123'
-          )
-          .map((item) => ({
-            _id: item.id,
-            familyCode: item.family_code || familyCode,
-            photoThumbnail: item.photo_thumbnail,
-            embedding: sanitizeEmbedding(item.embedding),
-            status: item.status,
-            timestamp: item.created_at
-          }));
-
-        const existingIds = new Set(queue.map((q) => q._id));
-        formatted.forEach((f) => {
-          if (!existingIds.has(f._id)) queue.push(f);
-        });
+      if (!error && data) {
+        const formatted = data.map((item) => ({
+          _id: item.id,
+          familyCode: item.family_code,
+          photoThumbnail: item.photo_thumbnail,
+          embedding: sanitizeEmbedding(item.embedding),
+          status: item.status,
+          timestamp: item.created_at
+        }));
+        return res.status(200).json({ success: true, count: formatted.length, data: formatted });
       }
-    } catch (sbErr) {}
-  }
+    }
+  } catch (sbErr) {}
 
-  // 3. Check Mongoose
   if (mongoose.connection.readyState === 1) {
     try {
-      const mongooseQueue = await UnknownQueue.find({ status: 'PENDING_REVIEW' })
+      const mongooseQueue = await UnknownQueue.find({ familyCode, status: 'PENDING_REVIEW' })
         .sort({ timestamp: -1 })
         .maxTimeMS(1000)
         .exec();
 
-      const existingIds = new Set(queue.map((q) => q._id));
-      mongooseQueue.forEach((m) => {
-        const mId = m._id.toString();
-        if (
-          !existingIds.has(mId) &&
-          (!m.familyCode || m.familyCode === familyCode || m.familyCode === 'FAM123' || familyCode === 'FAM123')
-        ) {
-          queue.push({
-            _id: mId,
-            familyCode: m.familyCode || familyCode,
-            photoThumbnail: m.photoThumbnail,
-            embedding: sanitizeEmbedding(m.embedding),
-            status: m.status,
-            timestamp: m.timestamp
-          });
-        }
-      });
+      return res.status(200).json({ success: true, count: mongooseQueue.length, data: mongooseQueue });
     } catch (mgErr) {}
   }
 
-  // 4. Fallback memory queue
-  const existingIds = new Set(queue.map((q) => q._id));
-  memoryUnknownQueue.forEach((mem) => {
-    if (
-      mem.status === 'PENDING_REVIEW' &&
-      (!mem.familyCode || mem.familyCode === familyCode || mem.familyCode === 'FAM123' || familyCode === 'FAM123') &&
-      !existingIds.has(mem._id)
-    ) {
-      queue.push(mem);
-    }
-  });
-
-  return res.status(200).json({ success: true, count: queue.length, data: queue });
+  const filtered = memoryUnknownQueue.filter(
+    (item) => item.familyCode === familyCode && item.status === 'PENDING_REVIEW'
+  );
+  return res.status(200).json({ success: true, count: filtered.length, data: filtered });
 };
 
 router.get('/queue/:familyCode', getUnknownsHandler);
@@ -232,14 +127,13 @@ router.get('/visitors/:familyCode/unknowns', getUnknownsHandler);
 
 const postUnknownHandler = async (req, res) => {
   try {
-    const familyCode = req.params?.familyCode || req.body?.familyCode || 'FAM123';
-    const photoThumbnail = req.body?.photoThumbnail || '';
-    const rawEmbedding = req.body?.embedding;
+    const familyCode = req.params.familyCode || req.body.familyCode || 'FAM123';
+    const { photoThumbnail, embedding: rawEmbedding } = req.body;
 
     const cleanVector = sanitizeEmbedding(rawEmbedding);
 
-    if (!photoThumbnail) {
-      return res.status(400).json({ success: false, error: 'Missing thumbnail image data' });
+    if (!photoThumbnail || cleanVector.length === 0) {
+      return res.status(400).json({ success: false, error: 'Missing thumbnail or valid embedding vector' });
     }
 
     const newQueueItem = {
@@ -251,60 +145,39 @@ const postUnknownHandler = async (req, res) => {
       timestamp: new Date().toISOString()
     };
 
-    // 1. RAM Memory Save
-    try {
-      memoryUnknownQueue.unshift(newQueueItem);
-      if (memoryUnknownQueue.length > 50) memoryUnknownQueue.length = 50;
-    } catch (ramErr) {}
+    memoryUnknownQueue.unshift(newQueueItem);
 
-    // 2. Persistent Local File Save
-    try {
-      const localList = loadLocalUnknowns();
-      localList.unshift(newQueueItem);
-      if (localList.length > 50) localList.length = 50;
-      saveLocalUnknowns(localList);
-    } catch (fileErr) {
-      console.warn('Local file queue save notice:', fileErr.message);
-    }
-
-    // 3. Supabase Cloud DB Save (Non-blocking)
     if (supabase) {
-      try {
-        supabase
-          .from('unknown_queue')
-          .insert([
-            {
-              family_code: familyCode,
-              photo_thumbnail: photoThumbnail,
-              embedding: cleanVector,
-              status: 'PENDING_REVIEW'
-            }
-          ])
-          .then(() => {})
-          .catch((e) => console.warn('Supabase queue insert notice:', e.message));
-      } catch (sbErr) {}
+      supabase
+        .from('unknown_queue')
+        .insert([
+          {
+            family_code: familyCode,
+            photo_thumbnail: photoThumbnail,
+            embedding: cleanVector,
+            status: 'PENDING_REVIEW'
+          }
+        ])
+        .then(() => {})
+        .catch(() => {});
     }
 
-    // 4. MongoDB Atlas Save (Non-blocking)
     if (mongoose.connection.readyState === 1) {
-      try {
-        new UnknownQueue({
-          familyCode,
-          photoThumbnail,
-          embedding: cleanVector,
-          status: 'PENDING_REVIEW',
-          timestamp: new Date()
-        })
-          .save()
-          .catch((e) => console.warn('Mongoose queue insert notice:', e.message));
-      } catch (mgErr) {}
+      new UnknownQueue({
+        familyCode,
+        photoThumbnail,
+        embedding: cleanVector,
+        status: 'PENDING_REVIEW',
+        timestamp: new Date()
+      })
+        .save()
+        .catch(() => {});
     }
 
-    console.log(`📸 [SNAPSHOT CAPTURED] Enqueued unknown snapshot for family code ${familyCode}`);
     return res.status(200).json({ success: true, id: newQueueItem._id, data: newQueueItem });
   } catch (err) {
-    console.error('Queue Post Fallback Handled:', err);
-    return res.status(200).json({ success: true, message: 'Snapshot received via fallback handler' });
+    console.error('Queue Post Error:', err);
+    return res.status(500).json({ success: false, error: 'Failed to save snapshot' });
   }
 };
 
@@ -512,217 +385,6 @@ router.patch('/queue/dismiss/:id', async (req, res) => {
   }
 
   return res.status(200).json({ success: true, message: 'Dismissed successfully' });
-});
-
-/**
- * ROUTINE & REMINDER ENDPOINTS
- */
-
-// GET /api/routines/:familyCode
-router.get('/routines/:familyCode', async (req, res) => {
-  const { familyCode } = req.params;
-  let routines = [];
-
-  // 1. Check local file DB
-  const localList = loadLocalRoutines();
-  routines = localList.filter((r) => r.familyCode === familyCode);
-
-  // Auto-seed preset routines if empty for family
-  if (routines.length === 0) {
-    const seeded = DEFAULT_PRESET_ROUTINES.map((preset, idx) => ({
-      _id: `rt_${Date.now()}_${idx}`,
-      familyCode,
-      ...preset,
-      days: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
-      lastAcknowledgedAt: null,
-      createdAt: new Date().toISOString()
-    }));
-
-    routines = seeded;
-    saveLocalRoutines([...localList, ...seeded]);
-  }
-
-  // 2. Try Supabase
-  if (supabase) {
-    try {
-      const { data, error } = await supabase.from('routines').select('*').eq('family_code', familyCode);
-      if (!error && data && data.length > 0) {
-        routines = data.map((r) => ({
-          _id: r.id,
-          familyCode: r.family_code,
-          activityName: r.activity_name,
-          time: r.time,
-          reminderMessage: r.reminder_message || '',
-          frequency: r.frequency || 'EVERYDAY',
-          days: r.days || ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
-          priority: r.priority || 'NORMAL',
-          voiceEnabled: r.voice_enabled ?? true,
-          caregiverNotify: r.caregiver_notify ?? true,
-          timeoutMinutes: r.timeout_minutes ?? 5,
-          isActive: r.is_active ?? true,
-          lastAcknowledgedAt: r.last_acknowledged_at || null,
-          createdAt: r.created_at
-        }));
-      }
-    } catch (e) {}
-  }
-
-  // Sort by time "HH:MM"
-  routines.sort((a, b) => a.time.localeCompare(b.time));
-  return res.status(200).json({ success: true, count: routines.length, data: routines });
-});
-
-// POST /api/routines/:familyCode
-router.post('/routines/:familyCode', async (req, res) => {
-  const { familyCode } = req.params;
-  const {
-    activityName,
-    time,
-    reminderMessage,
-    frequency,
-    days,
-    priority,
-    voiceEnabled,
-    caregiverNotify,
-    timeoutMinutes
-  } = req.body;
-
-  if (!activityName || !time) {
-    return res.status(400).json({ success: false, error: 'Activity name and time are required.' });
-  }
-
-  const newRoutine = {
-    _id: `rt_${Date.now()}`,
-    familyCode,
-    activityName: activityName.trim(),
-    time: time.trim(),
-    reminderMessage: (reminderMessage || '').trim(),
-    frequency: frequency || 'EVERYDAY',
-    days: days && days.length > 0 ? days : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
-    priority: priority || 'NORMAL',
-    voiceEnabled: voiceEnabled !== undefined ? Boolean(voiceEnabled) : true,
-    caregiverNotify: caregiverNotify !== undefined ? Boolean(caregiverNotify) : true,
-    timeoutMinutes: Number(timeoutMinutes) || 5,
-    isActive: true,
-    lastAcknowledgedAt: null,
-    createdAt: new Date().toISOString()
-  };
-
-  const localList = loadLocalRoutines();
-  localList.push(newRoutine);
-  saveLocalRoutines(localList);
-
-  if (mongoose.connection.readyState === 1) {
-    new Routine({
-      familyCode,
-      activityName: newRoutine.activityName,
-      time: newRoutine.time,
-      reminderMessage: newRoutine.reminderMessage,
-      frequency: newRoutine.frequency,
-      days: newRoutine.days,
-      priority: newRoutine.priority,
-      voiceEnabled: newRoutine.voiceEnabled,
-      caregiverNotify: newRoutine.caregiverNotify,
-      timeoutMinutes: newRoutine.timeoutMinutes,
-      isActive: true
-    }).save().catch(() => {});
-  }
-
-  if (supabase) {
-    supabase.from('routines').insert([{
-      family_code: familyCode,
-      activity_name: newRoutine.activityName,
-      time: newRoutine.time,
-      reminder_message: newRoutine.reminderMessage,
-      frequency: newRoutine.frequency,
-      days: newRoutine.days,
-      priority: newRoutine.priority,
-      voice_enabled: newRoutine.voiceEnabled,
-      caregiver_notify: newRoutine.caregiverNotify,
-      timeout_minutes: newRoutine.timeoutMinutes,
-      is_active: true
-    }]).then(() => {}).catch(() => {});
-  }
-
-  return res.status(201).json({ success: true, data: newRoutine });
-});
-
-// PUT /api/routines/:id
-router.put('/routines/:id', async (req, res) => {
-  const { id } = req.params;
-  const updates = req.body;
-
-  const localList = loadLocalRoutines();
-  const idx = localList.findIndex((r) => r._id === id);
-  if (idx !== -1) {
-    localList[idx] = { ...localList[idx], ...updates };
-    saveLocalRoutines(localList);
-  }
-
-  if (supabase) {
-    const sbPayload = {};
-    if (updates.activityName) sbPayload.activity_name = updates.activityName;
-    if (updates.time) sbPayload.time = updates.time;
-    if (updates.reminderMessage !== undefined) sbPayload.reminder_message = updates.reminderMessage;
-    if (updates.frequency) sbPayload.frequency = updates.frequency;
-    if (updates.priority) sbPayload.priority = updates.priority;
-    if (updates.voiceEnabled !== undefined) sbPayload.voice_enabled = updates.voiceEnabled;
-    if (updates.caregiverNotify !== undefined) sbPayload.caregiver_notify = updates.caregiverNotify;
-    if (updates.timeoutMinutes) sbPayload.timeout_minutes = updates.timeoutMinutes;
-    if (updates.isActive !== undefined) sbPayload.is_active = updates.isActive;
-
-    supabase.from('routines').update(sbPayload).eq('id', id).then(() => {}).catch(() => {});
-  }
-
-  return res.status(200).json({ success: true, message: 'Routine updated.' });
-});
-
-// DELETE /api/routines/:id
-router.delete('/routines/:id', async (req, res) => {
-  const { id } = req.params;
-  const localList = loadLocalRoutines();
-  const filtered = localList.filter((r) => r._id !== id);
-  saveLocalRoutines(filtered);
-
-  if (supabase) {
-    supabase.from('routines').delete().eq('id', id).then(() => {}).catch(() => {});
-  }
-
-  return res.status(200).json({ success: true, message: 'Routine deleted.' });
-});
-
-// PATCH /api/routines/toggle/:id
-router.patch('/routines/toggle/:id', async (req, res) => {
-  const { id } = req.params;
-  const localList = loadLocalRoutines();
-  const item = localList.find((r) => r._id === id);
-  if (item) {
-    item.isActive = !item.isActive;
-    saveLocalRoutines(localList);
-    if (supabase) {
-      supabase.from('routines').update({ is_active: item.isActive }).eq('id', id).then(() => {}).catch(() => {});
-    }
-  }
-  return res.status(200).json({ success: true, isActive: item ? item.isActive : false });
-});
-
-// PATCH /api/routines/ack/:id
-router.patch('/routines/ack/:id', async (req, res) => {
-  const { id } = req.params;
-  const nowISO = new Date().toISOString();
-
-  const localList = loadLocalRoutines();
-  const item = localList.find((r) => r._id === id);
-  if (item) {
-    item.lastAcknowledgedAt = nowISO;
-    saveLocalRoutines(localList);
-  }
-
-  if (supabase) {
-    supabase.from('routines').update({ last_acknowledged_at: nowISO }).eq('id', id).then(() => {}).catch(() => {});
-  }
-
-  return res.status(200).json({ success: true, acknowledgedAt: nowISO });
 });
 
 module.exports = router;

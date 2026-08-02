@@ -10,8 +10,6 @@ import {
   CheckCircle2,
   AlertCircle,
   Users,
-  Tag,
-  FileText,
   User,
   Volume2,
   BellRing,
@@ -19,17 +17,10 @@ import {
   UserPlus,
   Calendar,
   Plus,
-  Play,
-  Pause,
   Pill,
-  Sun,
-  Moon,
-  Utensils,
   Coffee,
   Heart,
-  Smile,
-  Edit3,
-  AlertTriangle
+  Activity
 } from 'lucide-react';
 
 function getRelativeTime(timestamp) {
@@ -108,16 +99,69 @@ function triggerDesktopNotification() {
   }
 }
 
+const DEFAULT_REMINDERS = [
+  {
+    id: 'rem_1',
+    time: '08:00 AM',
+    title: 'Morning Medicine & Breakfast',
+    note: 'Take 1 BP tablet with warm water after light breakfast.',
+    category: 'Medicine'
+  },
+  {
+    id: 'rem_2',
+    time: '01:00 PM',
+    title: 'Lunch & Hydration',
+    note: 'Fresh soup and roti. Ensure 2 glasses of water.',
+    category: 'Meal'
+  },
+  {
+    id: 'rem_3',
+    time: '05:30 PM',
+    title: 'Evening Garden Walk',
+    note: '15-minute gentle walk in the garden with daughter.',
+    category: 'Activity'
+  }
+];
+
 export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
   const [activeTab, setActiveTab] = useState('QUEUE');
   const [unknownQueue, setUnknownQueue] = useState([]);
   const [registeredVisitors, setRegisteredVisitors] = useState([]);
+  const [reminders, setReminders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
   const [isPolling, setIsPolling] = useState(true);
   const [formData, setFormData] = useState({});
+  const [showAddReminder, setShowAddReminder] = useState(false);
+  const [newReminder, setNewReminder] = useState({
+    time: '09:00 AM',
+    title: '',
+    note: '',
+    category: 'Medicine'
+  });
 
   const prevUnknownsLengthRef = useRef(null);
+
+  // Load reminders from localStorage
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(`memoriacare_reminders_${familyCode}`);
+      if (saved) {
+        setReminders(JSON.parse(saved));
+      } else {
+        setReminders(DEFAULT_REMINDERS);
+      }
+    } catch (e) {
+      setReminders(DEFAULT_REMINDERS);
+    }
+  }, [familyCode]);
+
+  const saveReminders = (newRemindersList) => {
+    setReminders(newRemindersList);
+    try {
+      localStorage.setItem(`memoriacare_reminders_${familyCode}`, JSON.stringify(newRemindersList));
+    } catch (e) {}
+  };
 
   const showToast = (message, type = 'success') => {
     setToast({ message, type });
@@ -177,140 +221,15 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
     }
   }, [familyCode]);
 
-  const [routines, setRoutines] = useState([]);
-  const [isRoutineModalOpen, setIsRoutineModalOpen] = useState(false);
-  const [editingRoutineId, setEditingRoutineId] = useState(null);
-  const [routineForm, setRoutineForm] = useState({
-    activityName: '',
-    time: '09:00',
-    reminderMessage: '',
-    frequency: 'EVERYDAY',
-    priority: 'NORMAL',
-    voiceEnabled: true,
-    caregiverNotify: true,
-    timeoutMinutes: 5
-  });
-
-  const fetchRoutines = useCallback(async () => {
-    try {
-      const res = await axios.get(`/api/routines/${familyCode}`);
-      const data = res.data?.data || [];
-      if (Array.isArray(data)) {
-        setRoutines(data);
-      }
-    } catch (err) {
-      console.error('Error fetching routines:', err);
-    }
-  }, [familyCode]);
-
-  const handleOpenAddRoutine = (preset = null) => {
-    if (preset) {
-      setRoutineForm({
-        activityName: preset.activityName,
-        time: preset.time,
-        reminderMessage: preset.reminderMessage,
-        frequency: preset.frequency || 'EVERYDAY',
-        priority: preset.priority || 'NORMAL',
-        voiceEnabled: preset.voiceEnabled ?? true,
-        caregiverNotify: preset.caregiverNotify ?? true,
-        timeoutMinutes: preset.timeoutMinutes || 5
-      });
-    } else {
-      setRoutineForm({
-        activityName: '',
-        time: '09:00',
-        reminderMessage: '',
-        frequency: 'EVERYDAY',
-        priority: 'NORMAL',
-        voiceEnabled: true,
-        caregiverNotify: true,
-        timeoutMinutes: 5
-      });
-    }
-    setEditingRoutineId(null);
-    setIsRoutineModalOpen(true);
-  };
-
-  const handleOpenEditRoutine = (item) => {
-    setEditingRoutineId(item._id);
-    setRoutineForm({
-      activityName: item.activityName,
-      time: item.time,
-      reminderMessage: item.reminderMessage || '',
-      frequency: item.frequency || 'EVERYDAY',
-      priority: item.priority || 'NORMAL',
-      voiceEnabled: item.voiceEnabled ?? true,
-      caregiverNotify: item.caregiverNotify ?? true,
-      timeoutMinutes: item.timeoutMinutes || 5
-    });
-    setIsRoutineModalOpen(true);
-  };
-
-  const handleSaveRoutineSubmit = async (e) => {
-    e.preventDefault();
-    if (!routineForm.activityName || !routineForm.time) {
-      showToast('Activity Name and Time are required.', 'error');
-      return;
-    }
-
-    try {
-      if (editingRoutineId) {
-        const res = await axios.put(`/api/routines/${editingRoutineId}`, routineForm);
-        if (res.data.success) {
-          showToast('Routine updated successfully.', 'success');
-        }
-      } else {
-        const res = await axios.post(`/api/routines/${familyCode}`, routineForm);
-        if (res.data.success) {
-          showToast('New routine item added.', 'success');
-        }
-      }
-      setIsRoutineModalOpen(false);
-      fetchRoutines();
-    } catch (err) {
-      console.error('Error saving routine:', err);
-      showToast('Failed to save routine item.', 'error');
-    }
-  };
-
-  const handleToggleRoutineActive = async (id) => {
-    try {
-      const res = await axios.patch(`/api/routines/toggle/${id}`);
-      if (res.data.success) {
-        showToast(res.data.isActive ? 'Routine activated.' : 'Routine paused.', 'info');
-        fetchRoutines();
-      }
-    } catch (err) {
-      console.error('Error toggling routine:', err);
-    }
-  };
-
-  const handleDeleteRoutine = async (id, title) => {
-    if (!window.confirm(`Are you sure you want to delete "${title}" from daily routines?`)) return;
-
-    try {
-      const res = await axios.delete(`/api/routines/${id}`);
-      if (res.data.success) {
-        showToast(`Deleted "${title}".`, 'success');
-        fetchRoutines();
-      }
-    } catch (err) {
-      console.error('Error deleting routine:', err);
-      showToast('Failed to delete routine.', 'error');
-    }
-  };
-
   useEffect(() => {
     prevUnknownsLengthRef.current = null;
     fetchUnknowns();
     fetchRegisteredVisitors();
-    fetchRoutines();
 
     const interval = setInterval(() => {
       if (isPolling) {
         fetchUnknowns();
         fetchRegisteredVisitors();
-        fetchRoutines();
       }
     }, 4000);
 
@@ -338,34 +257,34 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
       return;
     }
 
-    const targetSnapshot = unknownQueue.find((q) => (q._id || q.id) === unknownId);
+    const unknownItem = unknownQueue.find((item) => (item._id || item.id) === unknownId);
+    const embedding = unknownItem ? unknownItem.embedding : [];
 
     try {
       const res = await axios.post(`/api/queue/approve/${unknownId}`, {
         name,
         relationship,
         contextNote,
-        embedding: targetSnapshot?.embedding || [],
-        photoThumbnail: targetSnapshot?.photoThumbnail || targetSnapshot?.photo_thumbnail || ''
+        embedding
       });
 
       if (res.data.success) {
-        showToast(`Registered "${name}" (${relationship}) successfully!`, 'success');
-        
+        showToast(`Successfully registered ${name} (${relationship})!`, 'success');
+        setUnknownQueue((prev) => prev.filter((item) => (item._id || item.id) !== unknownId));
+
         setFormData((prev) => {
-          const next = { ...prev };
-          delete next[unknownId];
-          return next;
+          const updated = { ...prev };
+          delete updated[unknownId];
+          return updated;
         });
-        
-        fetchUnknowns();
+
         fetchRegisteredVisitors();
       } else {
-        showToast(res.data.message || 'Failed to register visitor.', 'error');
+        showToast(res.data.message || 'Failed to approve visitor.', 'error');
       }
     } catch (err) {
-      console.error('Error registering visitor:', err);
-      showToast('Server error while saving visitor.', 'error');
+      console.error('Error approving visitor:', err);
+      showToast('Server error while approving visitor.', 'error');
     }
   };
 
@@ -373,14 +292,12 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
     try {
       const res = await axios.patch(`/api/queue/dismiss/${unknownId}`);
       if (res.data.success) {
-        showToast('Snapshot dismissed from review queue.', 'info');
-        fetchUnknowns();
-      } else {
-        showToast(res.data.message || 'Failed to dismiss snapshot.', 'error');
+        showToast('Alert snapshot dismissed.', 'info');
+        setUnknownQueue((prev) => prev.filter((item) => (item._id || item.id) !== unknownId));
       }
     } catch (err) {
-      console.error('Error dismissing snapshot:', err);
-      showToast('Server error while dismissing snapshot.', 'error');
+      setUnknownQueue((prev) => prev.filter((item) => (item._id || item.id) !== unknownId));
+      showToast('Alert snapshot dismissed.', 'info');
     }
   };
 
@@ -401,6 +318,34 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
       console.error('Error deleting visitor:', err);
       showToast('Server error while deleting visitor.', 'error');
     }
+  };
+
+  const handleAddReminderSubmit = (e) => {
+    e.preventDefault();
+    if (!newReminder.title) {
+      showToast('Please enter a reminder title.', 'error');
+      return;
+    }
+
+    const item = {
+      id: `rem_${Date.now()}`,
+      time: newReminder.time,
+      title: newReminder.title.trim(),
+      note: newReminder.note.trim(),
+      category: newReminder.category
+    };
+
+    const updated = [...reminders, item];
+    saveReminders(updated);
+    setShowAddReminder(false);
+    setNewReminder({ time: '09:00 AM', title: '', note: '', category: 'Medicine' });
+    showToast('Daily reminder added successfully!', 'success');
+  };
+
+  const handleDeleteReminder = (id) => {
+    const updated = reminders.filter((r) => r.id !== id);
+    saveReminders(updated);
+    showToast('Reminder removed.', 'info');
   };
 
   const relationshipOptions = [
@@ -448,7 +393,7 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
                 </span>
               </div>
               <p className="text-slate-400 text-sm mt-0.5">
-                Review visitor alerts & manage registered family members
+                Review visitor alerts, manage registered family members & daily timetables
               </p>
             </div>
           </div>
@@ -489,10 +434,11 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
           </div>
         </header>
 
-        <div className="flex items-center border-b border-slate-800 gap-4">
+        {/* THREE DASHBOARD TABS */}
+        <div className="flex items-center border-b border-slate-800 gap-4 overflow-x-auto pb-1">
           <button
             onClick={() => setActiveTab('QUEUE')}
-            className={`pb-3 px-2 font-bold text-sm sm:text-base flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
+            className={`pb-3 px-2 font-bold text-sm sm:text-base flex items-center gap-2 border-b-2 transition-all cursor-pointer shrink-0 ${
               activeTab === 'QUEUE'
                 ? 'border-emerald-500 text-emerald-400'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -507,7 +453,7 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
 
           <button
             onClick={() => setActiveTab('REGISTERED')}
-            className={`pb-3 px-2 font-bold text-sm sm:text-base flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
+            className={`pb-3 px-2 font-bold text-sm sm:text-base flex items-center gap-2 border-b-2 transition-all cursor-pointer shrink-0 ${
               activeTab === 'REGISTERED'
                 ? 'border-emerald-500 text-emerald-400'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -521,9 +467,9 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
           </button>
 
           <button
-            onClick={() => setActiveTab('ROUTINE')}
-            className={`pb-3 px-2 font-bold text-sm sm:text-base flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
-              activeTab === 'ROUTINE'
+            onClick={() => setActiveTab('TIMETABLE')}
+            className={`pb-3 px-2 font-bold text-sm sm:text-base flex items-center gap-2 border-b-2 transition-all cursor-pointer shrink-0 ${
+              activeTab === 'TIMETABLE'
                 ? 'border-emerald-500 text-emerald-400'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
@@ -531,11 +477,12 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
             <Calendar className="w-4 h-4" />
             Daily Timetable & Reminders
             <span className="px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 text-xs font-extrabold border border-indigo-500/30">
-              {routines.length}
+              {reminders.length}
             </span>
           </button>
         </div>
 
+        {/* TAB 1: UNKNOWN VISITOR ALERTS */}
         {activeTab === 'QUEUE' && (
           <section>
             {loading ? (
@@ -601,52 +548,33 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
                             placeholder="e.g. Tanish"
                             value={currentForm.name || ''}
                             onChange={(e) => handleInputChange(itemId, 'name', e.target.value)}
-                            className="w-full bg-slate-900 border border-slate-800 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 rounded-xl px-3.5 py-2 text-sm text-white placeholder-slate-500 outline-none transition"
+                            className="w-full bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-xl p-3 text-sm text-white placeholder-slate-500 outline-none transition"
                           />
                         </div>
 
                         <div>
                           <label className="block text-xs font-bold text-slate-300 mb-1.5 flex items-center gap-1.5">
-                            <Tag className="w-3.5 h-3.5 text-cyan-400" />
+                            <Users className="w-3.5 h-3.5 text-emerald-400" />
                             Relationship <span className="text-rose-400">*</span>
                           </label>
-                          <div className="space-y-2">
-                            <select
-                              value={currentForm.relationshipPreset || ''}
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                handleInputChange(itemId, 'relationshipPreset', val);
-                                if (val !== 'Custom') {
-                                  handleInputChange(itemId, 'relationship', val);
-                                }
-                              }}
-                              className="w-full bg-slate-900 border border-slate-800 focus:border-cyan-500 rounded-xl px-3.5 py-2 text-sm text-white outline-none transition"
-                            >
-                              <option value="">Select Relationship...</option>
-                              {relationshipOptions.map((opt) => (
-                                <option key={opt} value={opt}>
-                                  {opt}
-                                </option>
-                              ))}
-                              <option value="Custom">+ Custom Relationship...</option>
-                            </select>
-
-                            {(!currentForm.relationshipPreset || currentForm.relationshipPreset === 'Custom') && (
-                              <input
-                                type="text"
-                                placeholder="e.g. Son, Doctor, Friend"
-                                value={currentForm.relationship || ''}
-                                onChange={(e) => handleInputChange(itemId, 'relationship', e.target.value)}
-                                className="w-full bg-slate-900 border border-slate-800 focus:border-cyan-500 rounded-xl px-3.5 py-2 text-sm text-white placeholder-slate-500 outline-none transition"
-                              />
-                            )}
-                          </div>
+                          <select
+                            value={currentForm.relationship || ''}
+                            onChange={(e) => handleInputChange(itemId, 'relationship', e.target.value)}
+                            className="w-full bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-xl p-3 text-sm text-white outline-none transition cursor-pointer"
+                          >
+                            <option value="">-- Select Relationship --</option>
+                            {relationshipOptions.map((rel) => (
+                              <option key={rel} value={rel}>
+                                {rel}
+                              </option>
+                            ))}
+                          </select>
                         </div>
 
                         <div>
                           <label className="block text-xs font-bold text-slate-300 mb-1.5 flex items-center gap-1.5">
-                            <FileText className="w-3.5 h-3.5 text-amber-400" />
-                            Memory Context Note
+                            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                            Memory Context Note (Spoken Greeting)
                           </label>
                           <textarea
                             rows={2}
@@ -683,6 +611,7 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
           </section>
         )}
 
+        {/* TAB 2: REGISTERED FAMILY MEMBERS */}
         {activeTab === 'REGISTERED' && (
           <section>
             {registeredVisitors.length === 0 ? (
@@ -753,333 +682,158 @@ export default function CaregiverDashboard({ familyCode = 'FAM123' }) {
           </section>
         )}
 
-        {/* 3. DAILY ROUTINE & REMINDERS TAB */}
-        {activeTab === 'ROUTINE' && (
-          <section className="space-y-6 animate-in fade-in">
-            {/* TIMETABLE HEADER ACTIONS */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-slate-900/60 p-5 rounded-3xl border border-slate-800 backdrop-blur-md">
+        {/* TAB 3: DAILY TIMETABLE & REMINDERS */}
+        {activeTab === 'TIMETABLE' && (
+          <section className="space-y-6">
+            <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-xl font-bold text-white flex items-center gap-2">
                   <Calendar className="w-5 h-5 text-indigo-400" />
-                  Daily Routine Timetable
+                  Patient Schedule & Timetable
                 </h2>
-                <p className="text-slate-400 text-xs mt-1">
-                  Create and manage scheduled activities, medication alerts, and spoken prompts for the mirror device.
+                <p className="text-slate-400 text-xs mt-0.5">
+                  Daily routine schedule, medication timers, and activities for caregiver oversight
                 </p>
               </div>
 
               <button
-                onClick={() => handleOpenAddRoutine()}
-                className="px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-bold text-xs flex items-center gap-2 cursor-pointer shadow-lg shadow-indigo-600/30 transition-all"
+                onClick={() => setShowAddReminder(!showAddReminder)}
+                className="px-4 py-2 rounded-2xl bg-indigo-600 hover:bg-indigo-500 active:scale-95 transition text-xs font-bold text-white flex items-center gap-2 cursor-pointer shadow-lg"
               >
                 <Plus className="w-4 h-4" />
-                <span>Add New Reminder</span>
+                Add Daily Reminder
               </button>
             </div>
 
-            {/* PRESET QUICK ADD BUTTONS */}
-            <div className="bg-slate-950/80 p-4 rounded-3xl border border-slate-800/80">
-              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-3">
-                ⚡ Quick Activity Presets:
-              </span>
-              <div className="flex flex-wrap gap-2">
-                {[
-                  { activityName: 'Wake Up', time: '07:00', reminderMessage: 'Good morning. Time to wake up and start your day.', priority: 'NORMAL' },
-                  { activityName: 'Brush Teeth', time: '07:30', reminderMessage: 'Time to brush your teeth.', priority: 'NORMAL' },
-                  { activityName: 'Breakfast', time: '08:00', reminderMessage: 'Time to enjoy your breakfast.', priority: 'NORMAL' },
-                  { activityName: 'Medicine Reminder', time: '09:00', reminderMessage: 'It is 9:00 AM. It is time for your morning medicine.', priority: 'URGENT' },
-                  { activityName: 'Morning Walk', time: '10:30', reminderMessage: 'Time for a gentle morning walk.', priority: 'NORMAL' },
-                  { activityName: 'Lunch', time: '13:00', reminderMessage: 'Time for lunch.', priority: 'NORMAL' },
-                  { activityName: 'Afternoon Snack', time: '16:00', reminderMessage: 'Time for a light snack and a glass of water.', priority: 'NORMAL' },
-                  { activityName: 'Family Time', time: '18:00', reminderMessage: 'Time to connect with your family.', priority: 'NORMAL' },
-                  { activityName: 'Dinner', time: '20:00', reminderMessage: 'Time for dinner.', priority: 'NORMAL' },
-                  { activityName: 'Prepare for Sleep', time: '21:30', reminderMessage: 'Time to relax and prepare for a restful sleep.', priority: 'IMPORTANT' }
-                ].map((preset, i) => (
-                  <button
-                    key={i}
-                    onClick={() => handleOpenAddRoutine(preset)}
-                    className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 hover:border-slate-700 text-xs font-medium transition cursor-pointer flex items-center gap-1.5"
-                  >
-                    <span>+</span>
-                    <span>{preset.time} — {preset.activityName}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
+            {showAddReminder && (
+              <form
+                onSubmit={handleAddReminderSubmit}
+                className="bg-slate-950/90 border border-indigo-500/40 rounded-3xl p-6 backdrop-blur-xl shadow-2xl space-y-4 animate-in fade-in slide-in-from-top-4"
+              >
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-indigo-400" />
+                  New Daily Schedule Item
+                </h3>
 
-            {/* ROUTINES LIST */}
-            {routines.length === 0 ? (
-              <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-12 text-center max-w-lg mx-auto">
-                <Calendar className="w-12 h-12 text-indigo-400 mx-auto mb-3 opacity-60" />
-                <h3 className="text-lg font-bold text-white">No Timetable Reminders Set</h3>
-                <p className="text-slate-400 text-sm mt-1 mb-4">
-                  Click "Add New Reminder" or tap a Quick Activity Preset to set up scheduled care prompts.
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 mb-1">Time</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 08:00 AM"
+                      value={newReminder.time}
+                      onChange={(e) => setNewReminder({ ...newReminder, time: e.target.value })}
+                      className="w-full bg-slate-900 border border-slate-800 focus:border-indigo-500 rounded-xl p-3 text-sm text-white outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 mb-1">Category</label>
+                    <select
+                      value={newReminder.category}
+                      onChange={(e) => setNewReminder({ ...newReminder, category: e.target.value })}
+                      className="w-full bg-slate-900 border border-slate-800 focus:border-indigo-500 rounded-xl p-3 text-sm text-white outline-none cursor-pointer"
+                    >
+                      <option value="Medicine">Medicine 💊</option>
+                      <option value="Meal">Meal 🍲</option>
+                      <option value="Activity">Activity 🚶‍♂️</option>
+                      <option value="Routine">Routine ⏰</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 mb-1">Title</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Morning BP Pill"
+                      value={newReminder.title}
+                      onChange={(e) => setNewReminder({ ...newReminder, title: e.target.value })}
+                      className="w-full bg-slate-900 border border-slate-800 focus:border-indigo-500 rounded-xl p-3 text-sm text-white outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1">Description / Care Note</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Take 1 tablet after breakfast with warm water"
+                    value={newReminder.note}
+                    onChange={(e) => setNewReminder({ ...newReminder, note: e.target.value })}
+                    className="w-full bg-slate-900 border border-slate-800 focus:border-indigo-500 rounded-xl p-3 text-sm text-white outline-none"
+                  />
+                </div>
+
+                <div className="flex items-center gap-3 pt-2">
+                  <button
+                    type="submit"
+                    className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white transition cursor-pointer"
+                  >
+                    Save Schedule Item
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowAddReminder(false)}
+                    className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {reminders.length === 0 ? (
+              <div className="bg-slate-950/60 border border-slate-800/80 rounded-3xl p-12 flex flex-col items-center justify-center text-center">
+                <Calendar className="w-10 h-10 text-indigo-400 mb-4" />
+                <h3 className="text-xl font-bold text-white mb-1">No Daily Reminders Set</h3>
+                <p className="text-slate-400 text-xs max-w-sm">
+                  Click "Add Daily Reminder" above to configure medication times, meal schedules, and patient activities.
                 </p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {routines.map((item) => {
-                  const isUrgent = item.priority === 'URGENT';
-                  const isImportant = item.priority === 'IMPORTANT';
-
-                  return (
-                    <div
-                      key={item._id}
-                      className={`bg-slate-950/90 border ${
-                        !item.isActive
-                          ? 'border-slate-800 opacity-60'
-                          : isUrgent
-                          ? 'border-rose-500/50 shadow-rose-500/10'
-                          : isImportant
-                          ? 'border-amber-500/50 shadow-amber-500/10'
-                          : 'border-slate-800 hover:border-indigo-500/40'
-                      } rounded-3xl p-6 backdrop-blur-md shadow-xl transition-all flex flex-col justify-between`}
-                    >
-                      <div>
-                        {/* CARD TOP HEADER */}
-                        <div className="flex items-center justify-between gap-3 mb-3">
-                          <div className="flex items-center gap-2">
-                            <span className="text-2xl font-black text-indigo-400 tracking-tight font-mono">
-                              {item.time}
-                            </span>
-                            <span
-                              className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
-                                isUrgent
-                                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 animate-pulse'
-                                  : isImportant
-                                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                                  : 'bg-slate-800 text-slate-300 border border-slate-700'
-                              }`}
-                            >
-                              {item.priority}
-                            </span>
-                          </div>
-
-                          <button
-                            onClick={() => handleToggleRoutineActive(item._id)}
-                            className={`px-3 py-1 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
-                              item.isActive
-                                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                                : 'bg-slate-800 text-slate-400 border border-slate-700'
-                            }`}
-                          >
-                            {item.isActive ? <Play className="w-3 h-3 text-emerald-400 fill-emerald-400" /> : <Pause className="w-3 h-3 text-slate-400" />}
-                            <span>{item.isActive ? 'Active' : 'Paused'}</span>
-                          </button>
-                        </div>
-
-                        {/* ACTIVITY TITLE */}
-                        <h3 className="text-xl font-bold text-white tracking-tight mb-2">
-                          {item.activityName}
-                        </h3>
-
-                        {/* REMINDER MESSAGE */}
-                        {item.reminderMessage && (
-                          <div className="bg-slate-900/80 p-3 rounded-2xl border border-slate-800/80 mb-4">
-                            <p className="text-xs text-slate-300 italic line-clamp-3">
-                              "{item.reminderMessage}"
-                            </p>
-                          </div>
-                        )}
-
-                        {/* METADATA TAGS */}
-                        <div className="flex flex-wrap items-center gap-2 mb-4 text-[11px] text-slate-400">
-                          <span className="bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-800">
-                            🔁 {item.frequency || 'EVERYDAY'}
-                          </span>
-                          {item.voiceEnabled && (
-                            <span className="bg-indigo-500/10 text-indigo-300 px-2.5 py-1 rounded-lg border border-indigo-500/20">
-                              🗣️ Voice Spoken
-                            </span>
-                          )}
-                          {item.caregiverNotify && (
-                            <span className="bg-rose-500/10 text-rose-300 px-2.5 py-1 rounded-lg border border-rose-500/20">
-                              🔔 Notify Caregiver ({item.timeoutMinutes || 5}m)
-                            </span>
-                          )}
-                        </div>
+              <div className="space-y-4">
+                {reminders.map((rem) => (
+                  <div
+                    key={rem.id}
+                    className="bg-slate-950/90 border border-slate-800 hover:border-indigo-500/40 rounded-2xl p-5 backdrop-blur-md shadow-lg transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 group"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400 font-bold shrink-0">
+                        {rem.category === 'Medicine' && <Pill className="w-6 h-6 text-rose-400" />}
+                        {rem.category === 'Meal' && <Coffee className="w-6 h-6 text-amber-400" />}
+                        {rem.category === 'Activity' && <Activity className="w-6 h-6 text-emerald-400" />}
+                        {rem.category === 'Routine' && <Heart className="w-6 h-6 text-indigo-400" />}
                       </div>
 
-                      {/* CARD ACTIONS */}
-                      <div className="flex items-center gap-2 pt-3 border-t border-slate-900 mt-auto">
-                        <button
-                          onClick={() => handleOpenEditRoutine(item)}
-                          className="flex-1 py-2 px-3 rounded-xl font-semibold text-xs text-slate-300 bg-slate-900 hover:bg-slate-800 border border-slate-800 transition flex items-center justify-center gap-1.5 cursor-pointer"
-                        >
-                          <Edit3 className="w-3.5 h-3.5" />
-                          <span>Edit</span>
-                        </button>
-
-                        <button
-                          onClick={() => handleDeleteRoutine(item._id, item.activityName)}
-                          className="py-2 px-3 rounded-xl font-semibold text-xs text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 transition flex items-center justify-center gap-1.5 cursor-pointer"
-                          title="Delete Routine"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="px-2.5 py-0.5 rounded-md bg-slate-800 text-indigo-300 text-xs font-mono font-bold border border-slate-700">
+                            {rem.time}
+                          </span>
+                          <span className="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 text-[10px] font-bold border border-indigo-500/30">
+                            {rem.category}
+                          </span>
+                        </div>
+                        <h4 className="text-base font-bold text-white mt-1">{rem.title}</h4>
+                        {rem.note && <p className="text-xs text-slate-400 mt-0.5">{rem.note}</p>}
                       </div>
                     </div>
-                  );
-                })}
+
+                    <button
+                      onClick={() => handleDeleteReminder(rem.id)}
+                      className="p-2 rounded-xl bg-slate-900 hover:bg-rose-950 text-slate-400 hover:text-rose-300 border border-slate-800 transition cursor-pointer self-end sm:self-center"
+                      title="Delete Reminder"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
           </section>
         )}
       </div>
-
-      {/* ROUTINE MODAL OVERLAY */}
-      {isRoutineModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl space-y-5">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-              <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                <Calendar className="w-5 h-5 text-indigo-400" />
-                <span>{editingRoutineId ? 'Edit Routine Item' : 'Add Routine Item'}</span>
-              </h3>
-              <button
-                onClick={() => setIsRoutineModalOpen(false)}
-                className="text-slate-400 hover:text-white transition cursor-pointer"
-              >
-                <XCircle className="w-6 h-6" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveRoutineSubmit} className="space-y-4">
-              {/* ACTIVITY NAME */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Activity Name *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Medicine Reminder, Breakfast, Walk"
-                  value={routineForm.activityName}
-                  onChange={(e) => setRoutineForm({ ...routineForm, activityName: e.target.value })}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              {/* TIME & PRIORITY */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Scheduled Time (24h) *
-                  </label>
-                  <input
-                    type="time"
-                    required
-                    value={routineForm.time}
-                    onChange={(e) => setRoutineForm({ ...routineForm, time: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500 font-mono"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Priority Level
-                  </label>
-                  <select
-                    value={routineForm.priority}
-                    onChange={(e) => setRoutineForm({ ...routineForm, priority: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
-                  >
-                    <option value="NORMAL">Normal</option>
-                    <option value="IMPORTANT">Important</option>
-                    <option value="URGENT">Urgent (Red Alert)</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* REMINDER MESSAGE */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Spoken Reminder Message
-                </label>
-                <textarea
-                  rows="2"
-                  placeholder="Message spoken aloud to the patient at scheduled time"
-                  value={routineForm.reminderMessage}
-                  onChange={(e) => setRoutineForm({ ...routineForm, reminderMessage: e.target.value })}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              {/* FREQUENCY & TIMEOUT */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Repeat Frequency
-                  </label>
-                  <select
-                    value={routineForm.frequency}
-                    onChange={(e) => setRoutineForm({ ...routineForm, frequency: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
-                  >
-                    <option value="EVERYDAY">Every day</option>
-                    <option value="WEEKDAYS">Weekdays</option>
-                    <option value="WEEKENDS">Weekends</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Ack Timeout (Mins)
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="60"
-                    value={routineForm.timeoutMinutes}
-                    onChange={(e) => setRoutineForm({ ...routineForm, timeoutMinutes: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-              </div>
-
-              {/* TOGGLES */}
-              <div className="space-y-2 pt-2 border-t border-slate-800">
-                <label className="flex items-center gap-3 text-xs font-medium text-slate-300 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={routineForm.voiceEnabled}
-                    onChange={(e) => setRoutineForm({ ...routineForm, voiceEnabled: e.target.checked })}
-                    className="w-4 h-4 rounded border-slate-700 bg-slate-950 text-indigo-600 focus:ring-0"
-                  />
-                  <span>🗣️ Speak reminder message out loud via mirror</span>
-                </label>
-
-                <label className="flex items-center gap-3 text-xs font-medium text-slate-300 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={routineForm.caregiverNotify}
-                    onChange={(e) => setRoutineForm({ ...routineForm, caregiverNotify: e.target.checked })}
-                    className="w-4 h-4 rounded border-slate-700 bg-slate-950 text-indigo-600 focus:ring-0"
-                  />
-                  <span>🔔 Notify caregiver if unacknowledged after timeout</span>
-                </label>
-              </div>
-
-              {/* SUBMIT BUTTON */}
-              <div className="flex items-center gap-3 pt-3">
-                <button
-                  type="button"
-                  onClick={() => setIsRoutineModalOpen(false)}
-                  className="flex-1 py-3 px-4 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-3 px-4 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-lg shadow-indigo-600/30 transition cursor-pointer"
-                >
-                  {editingRoutineId ? 'Save Changes' : 'Create Routine'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
