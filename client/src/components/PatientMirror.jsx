@@ -1,7 +1,30 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as faceapi from '@vladmandic/face-api';
 import axios from 'axios';
-import { Clock, Bell } from 'lucide-react';
+import { Clock } from 'lucide-react';
+
+const normalizeTime = (timeStr) => {
+  if (!timeStr) return '';
+  let clean = String(timeStr).trim().toLowerCase();
+
+  if (clean.includes('am') || clean.includes('pm')) {
+    const isPM = clean.includes('pm');
+    let [time] = clean.replace(/(am|pm)/g, '').trim().split(':');
+    let hours = parseInt(time, 10);
+    const minutes = clean.split(':')[1]?.replace(/(am|pm)/g, '').trim() || '00';
+    if (isPM && hours < 12) hours += 12;
+    if (!isPM && hours === 12) hours = 0;
+    return `${hours}:${minutes.padStart(2, '0')}`;
+  }
+
+  const [h, m] = clean.split(':');
+  return `${parseInt(h, 10)}:${(m || '00').padStart(2, '0')}`;
+};
+
+function isSameTime(t1, t2) {
+  if (!t1 || !t2) return false;
+  return normalizeTime(t1) === normalizeTime(t2);
+}
 
 function constructGreeting(visitor, lang) {
   const code = (lang || 'hi').toLowerCase().split('-')[0];
@@ -30,25 +53,19 @@ function constructGreeting(visitor, lang) {
   }
 }
 
-function constructReminderSpeech(reminder, lang) {
+const constructRoutineGreeting = (routine, lang) => {
+  const title = routine.title || 'Scheduled Activity';
+  const note = routine.note || routine.contextNote ? (routine.note || routine.contextNote).trim() : '';
   const code = (lang || 'hi').toLowerCase().split('-')[0];
-  const title = reminder.title || 'स्मरण पत्र';
-  const note = reminder.note ? reminder.note.trim() : '';
 
   if (code === 'hi') {
-    let text = `याद दिला दें, अब ${title} का समय हो गया है।`;
-    if (note) text += ` ${note}`;
-    return text;
+    return `याद दिला दें, अब ${title} का समय हो गया है। ${note}`;
   } else if (code === 'mr') {
-    let text = `आठवण ठेवा, आता ${title} ची वेळ झाली आहे।`;
-    if (note) text += ` ${note}`;
-    return text;
+    return `आठवण ठेवा, आता ${title} ची वेळ झाली आहे। ${note}`;
   } else {
-    let text = `Quick reminder, it is time for ${title}.`;
-    if (note) text += ` ${note}`;
-    return text;
+    return `Quick reminder, it is time for ${title}. ${note}`;
   }
-}
+};
 
 function getUnknownAlertText(lang) {
   const code = (lang || 'hi').toLowerCase().split('-')[0];
@@ -61,27 +78,24 @@ function getUnknownAlertText(lang) {
   }
 }
 
-function isSameTime(t1, t2) {
-  if (!t1 || !t2) return false;
-  const clean1 = String(t1).trim().toLowerCase().replace(/^0/, '');
-  const clean2 = String(t2).trim().toLowerCase().replace(/^0/, '');
-  return clean1 === clean2;
-}
-
 export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi-IN' }) {
   const videoRef = useRef(null);
   const [knownVisitors, setKnownVisitors] = useState([]);
+  const [routines, setRoutines] = useState([]);
+  const [activeReminder, setActiveReminder] = useState(null);
+
   const [isDataLoaded, setIsDataLoaded] = useState(false);
   const [isCameraStarted, setIsCameraStarted] = useState(false);
   const [statusMsg, setStatusMsg] = useState('Initializing...');
   const [activeVisitorCard, setActiveVisitorCard] = useState(null);
-  const [activeReminderBanner, setActiveReminderBanner] = useState(null);
 
   const isProcessingRef = useRef(false);
   const spokenUserRef = useRef(null);
   const unknownCounterRef = useRef(0);
   const isSnapshotLockedRef = useRef(false);
-  const lastSpokenReminderRef = useRef(null);
+
+  // Minute deduplication lock set
+  const triggeredRemindersRef = useRef(new Set());
 
   // Fetch visitors
   useEffect(() => {
@@ -104,46 +118,76 @@ export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi
     return () => clearInterval(pollInterval);
   }, [familyCode]);
 
-  // Scheduled Timetable Reminder Monitor
+  // 2. Fetch routines on mirror mount and poll every 30 seconds
   useEffect(() => {
-    const checkScheduledReminders = () => {
+    const fetchRoutines = async () => {
       try {
-        const saved = localStorage.getItem(`memoriacare_reminders_${familyCode}`);
-        if (!saved) return;
+        if (!familyCode) return;
+        const response = await axios.get(`/api/routines/${familyCode}`);
+        const list = response.data?.data || response.data || [];
 
-        const reminders = JSON.parse(saved);
-        if (!Array.isArray(reminders) || reminders.length === 0) return;
+        // Also check localStorage backup
+        const savedLocal = localStorage.getItem(`memoriacare_reminders_${familyCode}`);
+        const localList = savedLocal ? JSON.parse(savedLocal) : [];
 
-        const now = new Date();
-        const currentTimeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const combined = [...list, ...localList];
+        const unique = Array.from(new Map(combined.map((item) => [item._id || item.id, item])).values());
 
-        const matchingReminder = reminders.find((r) => isSameTime(r.time, currentTimeStr));
-
-        if (matchingReminder) {
-          const reminderKey = `${matchingReminder.id}_${currentTimeStr}`;
-
-          if (lastSpokenReminderRef.current !== reminderKey) {
-            lastSpokenReminderRef.current = reminderKey;
-            setActiveReminderBanner(matchingReminder);
-
-            const speechText = constructReminderSpeech(matchingReminder, currentLang);
-            console.log('⏰ Triggering Scheduled Reminder Cue:', speechText);
-            speakText(speechText, currentLang);
-
-            setTimeout(() => {
-              setActiveReminderBanner(null);
-            }, 15000);
-          }
-        }
-      } catch (e) {
-        console.warn('Error checking scheduled reminders:', e);
+        setRoutines(unique);
+        console.log('📋 Patient Mirror Loaded Routines:', unique);
+      } catch (err) {
+        console.error('Failed to load routines on mirror:', err);
       }
     };
 
-    checkScheduledReminders();
-    const reminderInterval = setInterval(checkScheduledReminders, 5000);
-    return () => clearInterval(reminderInterval);
-  }, [familyCode, currentLang]);
+    fetchRoutines();
+    const routineInterval = setInterval(fetchRoutines, 30000);
+    return () => clearInterval(routineInterval);
+  }, [familyCode]);
+
+  // 3. Monitor routines schedule with minute deduplication lock
+  useEffect(() => {
+    const checkSchedule = () => {
+      if (!routines || routines.length === 0) return;
+
+      const now = new Date();
+      const currentHours = now.getHours();
+      const currentMinutes = String(now.getMinutes()).padStart(2, '0');
+      const currentTimeFormatted = `${currentHours}:${currentMinutes}`;
+
+      const minuteKey = `${currentHours}:${currentMinutes}`;
+      if (triggeredRemindersRef.current.minuteKey !== minuteKey) {
+        triggeredRemindersRef.current = new Set();
+        triggeredRemindersRef.current.minuteKey = minuteKey;
+      }
+
+      routines.forEach((routine) => {
+        if (routine.isPaused || routine.isAcknowledged) return;
+
+        const schedTime = routine.time || routine.scheduledTime;
+        const isTimeMatch = isSameTime(schedTime, currentTimeFormatted);
+        const routineId = routine._id || routine.id;
+
+        if (isTimeMatch && !triggeredRemindersRef.current.has(routineId)) {
+          console.log('⏰ ROUTINE MATCH FOUND! Triggering Alert:', routine.title);
+
+          triggeredRemindersRef.current.add(routineId);
+          setActiveReminder(routine);
+
+          const spokenMsg = constructRoutineGreeting(routine, currentLang);
+          speakText(spokenMsg, currentLang);
+
+          setTimeout(() => {
+            setActiveReminder(null);
+          }, 15000);
+        }
+      });
+    };
+
+    checkSchedule();
+    const monitorTimer = setInterval(checkSchedule, 5000);
+    return () => clearInterval(monitorTimer);
+  }, [routines, currentLang]);
 
   const startMirrorSystem = async () => {
     if (isCameraStarted) return;
@@ -328,17 +372,17 @@ export default function PatientMirror({ familyCode = 'FAM123', currentLang = 'hi
 
         <p className="mt-3 text-slate-400 text-xs font-medium uppercase tracking-wider">{statusMsg}</p>
 
-        {/* TIMETABLE SCHEDULED REMINDER ALERT OVERLAY */}
-        {activeReminderBanner && (
+        {/* TIMETABLE ROUTINE SCHEDULED ALERT OVERLAY */}
+        {activeReminder && (
           <div className="mt-4 p-5 bg-indigo-950/90 backdrop-blur-md border border-indigo-500/50 rounded-2xl text-center w-full shadow-2xl animate-in fade-in slide-in-from-bottom-3">
             <div className="flex items-center justify-center gap-2 text-indigo-300 text-xs font-mono font-bold mb-1">
               <Clock className="w-4 h-4 text-indigo-400" />
-              <span>DAILY REMINDER ({activeReminderBanner.time})</span>
+              <span>ROUTINE ALERT ({activeReminder.time || activeReminder.scheduledTime})</span>
             </div>
-            <h2 className="text-2xl font-bold text-white">{activeReminderBanner.title}</h2>
-            {activeReminderBanner.note && (
+            <h2 className="text-2xl font-bold text-white">{activeReminder.title}</h2>
+            {(activeReminder.note || activeReminder.contextNote) && (
               <p className="text-indigo-200 text-sm mt-2 border-t border-indigo-800/80 pt-2 italic">
-                "{activeReminderBanner.note}"
+                "{activeReminder.note || activeReminder.contextNote}"
               </p>
             )}
           </div>
